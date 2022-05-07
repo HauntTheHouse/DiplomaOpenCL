@@ -10,11 +10,18 @@ add_definitions(
         -DCL_HPP_ENABLE_EXCEPTIONS
 )
 
-add_executable(${PROJECT} ${SRCs})
 
-# set(TCP_DIR ../TCP)
+#add_subdirectory("libs/OpenCL-CLHPP")
+#add_subdirectory("libs/OpenCL-Headers")
+#add_subdirectory("libs/OpenCL-ICD-Loader")
+
+add_subdirectory(lib)
+
+add_executable(${PROJECT} ${SRCs})
 target_link_libraries(${PROJECT} PRIVATE OpenCL)
-# target_include_directories(${PROJECT} PUBLIC ${TCP_DIR})
+target_include_directories(${PROJECT} PUBLIC "lib/include")
+
+#find_library(OpenCLICDLoader HINTS lib/share/cmake)
 
 file(COPY kernels DESTINATION .)
 file(COPY data DESTINATION .)
