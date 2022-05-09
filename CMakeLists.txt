@@ -10,11 +10,11 @@ add_definitions(
         -DCL_HPP_ENABLE_EXCEPTIONS
 )
 
-add_executable(${PROJECT} ${SRCs})
+find_package(OpenCL REQUIRED)
 
-# set(TCP_DIR ../TCP)
-target_link_libraries(${PROJECT} PRIVATE OpenCL)
-# target_include_directories(${PROJECT} PUBLIC ${TCP_DIR})
+add_executable(${PROJECT} ${SRCs})
+target_link_libraries(${PROJECT} PRIVATE ${OpenCL_LIBRARIES})
+target_include_directories(${PROJECT} PUBLIC ${OpenCL_INCLUDE_DIRS})
 
 file(COPY kernels DESTINATION .)
 file(COPY data DESTINATION .)
