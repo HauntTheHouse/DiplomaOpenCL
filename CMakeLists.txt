@@ -4,7 +4,7 @@ project(${PROJECT})
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(SRCs main.cpp SparseMatrix.h SparseMatrix.cpp)
+set(SRCs src/main.cpp src/SparseMatrix.h src/SparseMatrix.cpp)
 add_definitions(
         -DCL_HPP_TARGET_OPENCL_VERSION=210
         -DCL_HPP_ENABLE_EXCEPTIONS
