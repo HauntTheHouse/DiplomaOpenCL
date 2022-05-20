@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.0)
-set (PROJECT OpenCL_test)
+set (PROJECT DiplomaOpenCL)
 project(${PROJECT})
 
 set(CMAKE_CXX_STANDARD 17)
