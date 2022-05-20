@@ -1,5 +1,4 @@
 #include <iostream>
-#include <sstream>
 #include <vector>
 #include <string>
 #include <cmath>
@@ -8,6 +7,7 @@
 
 #include "SparseMatrix.h"
 #include "Time.h"
+#include "Utils.h"
 
 void conjugateGradientCpu(int dim, int num_vals, double *x, int *rows, int *cols, double *A,
                           double *b, double *result)
@@ -203,10 +203,7 @@ int main()
 //    std::string method = "steepestDescent";
 
     std::cout << "Algorithm that solves linear equation: " << method << std::endl;
-    std::ifstream kernelFile("kernels/" + method + ".cl");
-    std::stringstream srcStream;
-    srcStream << kernelFile.rdbuf();
-    std::string src = srcStream.str();
+    std::string src = Utils::readFileToString("kernels/" + method + ".cl");
 
     cl::Program::Sources sources;
     sources.push_back(src);
