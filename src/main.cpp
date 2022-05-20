@@ -2,22 +2,12 @@
 #include <sstream>
 #include <vector>
 #include <string>
-#include <chrono>
 #include <cmath>
 
 #include <CL/opencl.hpp>
 
 #include "SparseMatrix.h"
-
-template<typename T, typename U>
-size_t computeTime(const U& funcToCompute)
-{
-    const auto start = std::chrono::steady_clock::now();
-    funcToCompute();
-    const auto end = std::chrono::steady_clock::now();
-
-    return std::chrono::duration_cast<T>(end - start).count();;
-}
+#include "Time.h"
 
 void conjugateGradientCpu(int dim, int num_vals, double *x, int *rows, int *cols, double *A,
                           double *b, double *result)
@@ -200,8 +190,8 @@ int main()
     device = devices.back();
     std::cout << "Using device: " << device.getInfo<CL_DEVICE_NAME>() << std::endl;
 
-//    SparseMatrix sparseMatrix("data/sparse_matrix_420.txt");
-    SparseMatrix sparseMatrix("data/bcsstm12.mtx");
+    SparseMatrix sparseMatrix("data/sparse_matrix_112.txt");
+    //SparseMatrix sparseMatrix("data/bcsstm12.mtx");
     sparseMatrix.fillVectorBFullyWithConcreteValue(200.0);
 
     std::ofstream stream;
@@ -254,8 +244,8 @@ int main()
     std::cout << "KERNEL_WORK_GROUP_SIZE: " << kernelWorkGroupSize << std::endl;
     std::cout << "DEVICE_MAX_WORK_GROUP_SIZE: " << deviceMaxWorkGroupSize << std::endl;
 
-//    if (dimension > kernelWorkGroupSize)
-//        return -1;
+    if (dimension > kernelWorkGroupSize)
+        return -1;
 
     cl::CommandQueue queue(context, device);
 
@@ -294,8 +284,8 @@ int main()
                                     result.data());
     };
 
-//    const auto measuredTime = computeTime<std::chrono::microseconds>(computeLinearSystem);
-    const auto measuredTime = computeTime<std::chrono::microseconds>(func);
+    const auto measuredTime = Time::compute(computeLinearSystem);
+    //const auto measuredTime = Time::compute(func);
 
     for (const auto val : x)
     {
@@ -305,5 +295,5 @@ int main()
 
     std::cout << "Iterations: " << static_cast<int>(result[0]) << std::endl;
     std::cout << "Residual length: " << result[1] << std::endl << std::endl;
-    std::cout << "Compute time: " << measuredTime/1000.0 << " ms" << std::endl;
+    std::cout << "Compute time: " << measuredTime.value << " " << Time::toString(measuredTime.measure) << std::endl;
 }
