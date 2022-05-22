@@ -120,7 +120,7 @@ void SparseMatrix::fillVectorBWithRandomValues(double minValue, double maxValue)
     }
 }
 
-void SparseMatrix::fillVectorBFullyWithConcreteValue(double value)
+void SparseMatrix::fillVectorBWithValue(double value)
 {
     for (int i = 0; i < m_Dimension; ++i)
     {

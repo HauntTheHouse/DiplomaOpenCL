@@ -17,13 +17,14 @@ public:
 
     int getDimension() const { return m_Dimension; }
     int getValuesNum() const { return m_NumValues; }
-    int* getRowIds() { return m_RowIds.data(); }
-    int* getColIds() { return m_ColIds.data(); }
-    double* getValues() { return m_Values.data(); }
-    double* getVectorB() { return m_B.data(); }
+
+    const int* getRowIds() const { return m_RowIds.data(); }
+    const int* getColIds() const { return m_ColIds.data(); }
+    const double* getValues() const { return m_Values.data(); }
+    const double* getVectorB() const { return m_B.data(); }
 
     void fillVectorBWithRandomValues(double minValue, double maxValue);
-    void fillVectorBFullyWithConcreteValue(double value);
+    void fillVectorBWithValue(double value);
 
 private:
     void sort();

@@ -14,14 +14,14 @@ namespace Time
         SECONDS,
     };
 
-    struct Result
+    struct ComputedTime
     {
         int64_t value;
         Measure measure;
     };
 
     template<typename T>
-    Result compute(const T& funcToCompute)
+    ComputedTime compute(const T& funcToCompute)
     {
         const auto start = std::chrono::steady_clock::now();
         funcToCompute();
@@ -42,17 +42,17 @@ namespace Time
         return { count, measure };
     }
 
-    std::string toString(Measure measure)
+    inline std::string toString(Measure measure)
     {
         switch (measure)
         {
-        case Time::Measure::NANOSECONDS:
+        case Measure::NANOSECONDS:
             return "nanoseconds";
-        case Time::Measure::MICROSECONDS:
+        case Measure::MICROSECONDS:
             return "microseconds";
-        case Time::Measure::MILISECONDS:
+        case Measure::MILISECONDS:
             return "miliseconds";
-        case Time::Measure::SECONDS:
+        case Measure::SECONDS:
             return "seconds";
         default:
             return "";
