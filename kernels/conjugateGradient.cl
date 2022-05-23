@@ -1,7 +1,7 @@
 __kernel void conjugateGradient(int dim, int num_vals,
-                                __local double *r, __global double *x, __local double * A_times_p, __local double *p,
-                              __global int *rows, __global int *cols, __global double *A,
-                              __global double *b, __global double *result)
+                                __local double *r, __local double *A_times_p, __local double *p,
+                                __global int *rows, __global int *cols, __global double *A,
+                                __global double *b, __global double *x, __global double *result)
 {
     local double alpha, r_length, old_r_dot_r, new_r_dot_r;
     local int iteration;
