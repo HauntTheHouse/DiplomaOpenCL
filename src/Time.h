@@ -20,11 +20,11 @@ namespace Time
         Measure measure;
     };
 
-    template<typename T>
-    ComputedTime compute(const T& funcToCompute)
+    template<typename T, typename ...Args>
+    ComputedTime compute(T&& funcToCompute, Args&&... arguments)
     {
         const auto start = std::chrono::steady_clock::now();
-        funcToCompute();
+        funcToCompute(arguments...);
         const auto end = std::chrono::steady_clock::now();
 
         Measure measure = Measure::NANOSECONDS;
