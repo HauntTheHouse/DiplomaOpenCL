@@ -1,7 +1,6 @@
-__kernel void steepestDescent(int dim, int num_vals, __local double *r,
-              __global double *x, __local double* A_times_r, __global int *rows,
-              __global int *cols, __global double *A, __global double *b,
-              __global double *result)
+__kernel void steepestDescent(int dim, int num_vals, __local double *r, __local double* A_times_r,
+                              __global int *rows, __global int *cols, __global double *A, __global double *b,
+                              __global double *x, __global double *result)
 {
     local double alpha, r_length;
     local int iteration;
@@ -40,7 +39,7 @@ __kernel void steepestDescent(int dim, int num_vals, __local double *r,
 
     iteration = 0;
     r_length = 0.01;
-    while ((iteration < 5000) && (r_length >= 0.01))
+    while ((iteration < 50000) && (r_length >= 0.01))
     {
         // printf("ThreadID: %d, Iteration: %f, ResidualLength: %f\n", id, iteration, end_index);
 

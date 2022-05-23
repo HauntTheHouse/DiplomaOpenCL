@@ -93,14 +93,14 @@ namespace Algorithms
         }
     }
 
-    ResultConjugateGradient Algorithms::conjugateGradientCpu(const SparseMatrix& aSparseMatrix)
+    Result Algorithms::conjugateGradientCpu(const SparseMatrix& aSparseMatrix)
     {
         std::vector<double> x(aSparseMatrix.getDimension());
         int iterations;
         double residualLength;
 
         auto computeLinearSystem = [
-            dim = aSparseMatrix.getDimension(),
+                dim = aSparseMatrix.getDimension(),
                 num_vals = aSparseMatrix.getValuesNum(),
                 rows = aSparseMatrix.getRowIds(),
                 cols = aSparseMatrix.getColIds(),
@@ -184,7 +184,7 @@ namespace Algorithms
             return { x, iterations, residualLength, measuredTime };
     }
 
-    ResultConjugateGradient Algorithms::conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
+    Result Algorithms::conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
     {
         const auto dimension = aSparseMatrix.getDimension();
         const auto numValues = aSparseMatrix.getValuesNum();
@@ -220,6 +220,119 @@ namespace Algorithms
         };
 
         const auto measuredTime = computeWithOpenCL("kernels/conjugateGradient.cl", computeLinearSystem);
+
+        return { x, static_cast<int>(result[0]), result[1], measuredTime };
+    }
+
+    Result steepestDescentCpu(const SparseMatrix& aSparseMatrix)
+    {
+        std::vector<double> x(aSparseMatrix.getDimension());
+        int iterations;
+        double residualLength;
+
+        auto computeLinearSystem = [
+                dim = aSparseMatrix.getDimension(),
+                num_vals = aSparseMatrix.getValuesNum(),
+                rows = aSparseMatrix.getRowIds(),
+                cols = aSparseMatrix.getColIds(),
+                A = aSparseMatrix.getValues(),
+                b = aSparseMatrix.getVectorB(),
+                &x = x,
+                &iterations = iterations,
+                &residualLength = residualLength]()
+            {
+                std::vector<double> r(dim);
+                std::vector<double> A_times_r(dim);
+
+                double alpha, r_length;
+                double r_dot_r, Ar_dot_r;
+
+                for (int i = 0; i < dim; ++i)
+                {
+                    r[i] = b[i];
+                    x[i] = 0.0;
+                }
+
+                int iteration = 0;
+                r_length = 0.01;
+                while (iteration < 50000 && r_length >= 0.01)
+                {
+                    int etalon = 0;
+                    int j = 0;
+
+                    for (int i = 0; i < dim; ++i)
+                    {
+                        A_times_r[i] = 0.0;
+                        while (etalon == rows[j])
+                        {
+                            A_times_r[i] += A[j] * r[cols[j]];
+                            j++;
+                        }
+                        etalon++;
+                    }
+
+                    r_dot_r = 0.0;
+                    Ar_dot_r = 0.0;
+                    for (int i = 0; i < dim; i++)
+                    {
+                        r_dot_r += r[i] * r[i];
+                        Ar_dot_r += A_times_r[i] * r[i];
+                    }
+                    alpha = r_dot_r / Ar_dot_r;
+
+                    for (int i = 0; i < dim; i++)
+                    {
+                        x[i] += alpha * r[i];
+                        r[i] -= alpha * A_times_r[i];
+                    }
+
+                    r_length = sqrt(r_dot_r);
+                    iteration++;
+                }
+                iterations = iteration;
+                residualLength = r_length;
+            };
+
+            const auto measuredTime = Time::compute(computeLinearSystem);
+
+            return { x, iterations, residualLength, measuredTime };
+    }
+
+    Result steepestDescentGpu(const SparseMatrix& aSparseMatrix)
+    {
+        const auto dimension = aSparseMatrix.getDimension();
+        const auto numValues = aSparseMatrix.getValuesNum();
+
+        std::vector<double> x(dimension);
+        std::vector<double> result(2);
+
+        auto computeLinearSystem = [&](const cl::Context& context, cl::Kernel& kernel, cl::CommandQueue& queue)
+        {
+            cl::Buffer rowsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getRowIds()));
+            cl::Buffer colsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getColIds()));
+            cl::Buffer valuesBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(double), const_cast<double*>(aSparseMatrix.getValues()));
+            cl::Buffer bBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, dimension * sizeof(double), const_cast<double*>(aSparseMatrix.getVectorB()));
+            cl::Buffer xBuf(context, CL_MEM_READ_WRITE, dimension * sizeof(double));
+            cl::Buffer resultBuf(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, 2 * sizeof(double));
+
+            kernel.setArg(0, sizeof(int), &dimension);
+            kernel.setArg(1, sizeof(int), &numValues);
+            kernel.setArg(2, cl::Local(dimension * sizeof(double)));
+            kernel.setArg(3, cl::Local(dimension * sizeof(double)));
+            kernel.setArg(4, rowsBuf);
+            kernel.setArg(5, colsBuf);
+            kernel.setArg(6, valuesBuf);
+            kernel.setArg(7, bBuf);
+            kernel.setArg(8, xBuf);
+            kernel.setArg(9, resultBuf);
+
+            queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(dimension), cl::NDRange(dimension));
+
+            queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
+            queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data());
+        };
+
+        const auto measuredTime = computeWithOpenCL("kernels/steepestDescent.cl", computeLinearSystem);
 
         return { x, static_cast<int>(result[0]), result[1], measuredTime };
     }

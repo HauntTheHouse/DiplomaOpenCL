@@ -8,7 +8,7 @@ class SparseMatrix;
 
 namespace Algorithms
 {
-	struct ResultConjugateGradient
+	struct Result
 	{
 		std::vector<double> x;
 		int iterationNum;
@@ -16,6 +16,9 @@ namespace Algorithms
 		Time::ComputedTime computeTime;
 	};
 
-	ResultConjugateGradient conjugateGradientCpu(const SparseMatrix& aSparseMatrix);
-	ResultConjugateGradient conjugateGradientGpu(const SparseMatrix& aSparseMatrix);
+	Result conjugateGradientCpu(const SparseMatrix& aSparseMatrix);
+	Result conjugateGradientGpu(const SparseMatrix& aSparseMatrix);
+
+	Result steepestDescentCpu(const SparseMatrix& aSparseMatrix);
+	Result steepestDescentGpu(const SparseMatrix& aSparseMatrix);
 }
