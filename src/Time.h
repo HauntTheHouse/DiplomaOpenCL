@@ -16,7 +16,7 @@ namespace Time
 
     struct ComputedTime
     {
-        int64_t value;
+        long double value;
         Measure measure;
     };
 
@@ -28,14 +28,14 @@ namespace Time
         const auto end = std::chrono::steady_clock::now();
 
         Measure measure = Measure::NANOSECONDS;
-        auto count = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+        long double count = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
 
         const auto measuresNum = static_cast<size_t>(Measure::SECONDS) + 1;
         for (size_t i = 0; i < measuresNum; ++i)
         {
-            if (count < 1000)
+            if (count < 1000.0)
                 break;
-            count /= 1000;
+            count /= 1000.0;
             measure = static_cast<Measure>(static_cast<size_t>(measure) + 1);
         }
 
