@@ -12,7 +12,14 @@ namespace Algorithms
 {
     namespace
     {
-        Time::ComputedTime computeWithOpenCL(const std::string& aKernelPath, const std::function<void(const cl::Context&, cl::Kernel&, cl::CommandQueue&)>& aProgramEnqueue)
+        struct OpenCLParameters
+        {
+            cl::Context context;
+            cl::Program program;
+            cl::Device device;
+        };
+
+        OpenCLParameters initOpenCL(const std::string& aPathToKernel)
         {
             cl::Context context;
             cl::Program program;
@@ -23,10 +30,10 @@ namespace Algorithms
             if (platforms.empty())
             {
                 std::cerr << "No platforms found!" << std::endl;
-                exit(1);
+                exit(-1);
             }
 
-            for (int i = 0; i < platforms.size(); ++i)
+            for (size_t i = 0; i < platforms.size(); ++i)
             {
                 std::cout << i + 1 << ". " << platforms[i].getInfo<CL_PLATFORM_NAME>() << std::endl;
 
@@ -38,10 +45,6 @@ namespace Algorithms
                 {
                     std::cout << '\t' << dev.getInfo<CL_DEVICE_NAME>() << std::endl;
                     std::cout << "\tMAX_WORK_GROUP_SIZE: " << dev.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>() << std::endl;
-                    for (auto& itemSize : dev.getInfo<CL_DEVICE_MAX_WORK_ITEM_SIZES>())
-                    {
-                        std::cout << "\t\tMAX_ITEM_SIZE: " << itemSize << std::endl;
-                    }
                     std::cout << "\tMAX_WORK_ITEM_DIMENSIONS: " << dev.getInfo<CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS>() << std::endl;
                     std::cout << "\tMAX_COMPUTE_UNITS: " << dev.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << std::endl;
                 }
@@ -56,12 +59,7 @@ namespace Algorithms
             device = devices.back();
             std::cout << "Using device: " << device.getInfo<CL_DEVICE_NAME>() << std::endl;
 
-            auto first = aKernelPath.find_first_of('/') + 1;
-            auto last = aKernelPath.find_last_of('.');
-            std::string method = aKernelPath.substr(first, last - first);
-            std::cout << "Algorithm that solves linear equation: " << method << std::endl;
-
-            std::string src = Utils::readFileToString(aKernelPath);
+            std::string src = Utils::readFileToString(aPathToKernel);
 
             cl::Program::Sources sources;
             sources.push_back(src);
@@ -76,21 +74,254 @@ namespace Algorithms
                 std::cerr << "Error!" << std::endl;
                 std::cerr << "Build Status: " << program.getBuildInfo<CL_PROGRAM_BUILD_STATUS>(device) << std::endl;
                 std::cerr << "Build Log:" << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device) << std::endl;
-                exit(-1);
+                exit(-2);
             }
 
-            cl::Kernel kernel(program, method.c_str());
-
-            int kernelWorkGroupSize = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
-            int deviceMaxWorkGroupSize = device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
-            std::cout << "KERNEL_WORK_GROUP_SIZE: " << kernelWorkGroupSize << std::endl;
-            std::cout << "DEVICE_MAX_WORK_GROUP_SIZE: " << deviceMaxWorkGroupSize << std::endl;
-
-            cl::CommandQueue queue(context, device);
-
-            const auto measuredTime = Time::compute(aProgramEnqueue, context, kernel, queue);
-            return measuredTime;
+            return { context, program, device };
         }
+    }
+
+    Result Algorithms::conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
+    {
+        const auto dimension = aSparseMatrix.getDimension();
+        const auto numValues = aSparseMatrix.getValuesNum();
+
+        std::vector<double> x(dimension);
+        std::vector<double> result(2);
+
+        const auto [context, program, device] = initOpenCL("kernels/conjugateGradient.cl");
+
+        cl::Kernel kernel(program, "conjugateGradient");
+
+        int deviceMaxWorkGroupSize = device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
+        std::cout << "DEVICE_MAX_WORK_GROUP_SIZE: " << deviceMaxWorkGroupSize << std::endl << std::endl;
+        if (dimension > deviceMaxWorkGroupSize)
+        {
+            std::cerr << "Dimension of matrix is bigger than max work group size of the device. Use scaledConjugateGradientGpu() algorithm instead" << std::endl;
+            exit(-3);
+        }
+
+        cl::Buffer rowsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getRowIds()));
+        cl::Buffer colsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getColIds()));
+        cl::Buffer valuesBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(double), const_cast<double*>(aSparseMatrix.getValues()));
+        cl::Buffer bBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, dimension * sizeof(double), const_cast<double*>(aSparseMatrix.getVectorB()));
+        cl::Buffer xBuf(context, CL_MEM_READ_WRITE, dimension * sizeof(double));
+        cl::Buffer resultBuf(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, 2 * sizeof(double));
+
+        kernel.setArg(0, sizeof(int), &dimension);
+        kernel.setArg(1, sizeof(int), &numValues);
+        kernel.setArg(2, cl::Local(dimension * sizeof(double)));
+        kernel.setArg(3, cl::Local(dimension * sizeof(double)));
+        kernel.setArg(4, cl::Local(dimension * sizeof(double)));
+        kernel.setArg(5, rowsBuf);
+        kernel.setArg(6, colsBuf);
+        kernel.setArg(7, valuesBuf);
+        kernel.setArg(8, bBuf);
+        kernel.setArg(9, xBuf);
+        kernel.setArg(10, resultBuf);
+
+        cl::CommandQueue queue(context, device);
+
+        auto computeLinearSystem = [&]()
+        {
+            queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(dimension), cl::NDRange(dimension));
+
+            queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
+            queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data());
+        };
+
+        const auto measuredTime = Time::compute(computeLinearSystem);
+
+        return { x, static_cast<int>(result[0]), result[1], measuredTime };
+    }
+
+    Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
+    {
+        const auto [context, program, device] = initOpenCL("kernels/conjugateGradientScaled.cl");
+
+        cl::Kernel init_kernel(program, "init");
+        cl::Kernel update_r_length_old_kernel(program, "update_r_length");
+        cl::Kernel update_A_times_p_kernel(program, "update_A_times_p");
+        cl::Kernel calculate_alpha_kernel(program, "calculate_alpha");
+        cl::Kernel update_guess_kernel(program, "update_guess");
+        cl::Kernel update_r_length_new_kernel(program, "update_r_length");
+        cl::Kernel update_direction_kernel(program, "update_direction");
+        cl::Kernel sync_r_dot_r_kernel(program, "sync_r_dot_r");
+
+        cl::CommandQueue queue = cl::CommandQueue(context, device);
+
+        int deviceMaxWorkGroupSize = device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
+        std::cout << "DEVICE_MAX_WORK_GROUP_SIZE: " << deviceMaxWorkGroupSize << std::endl << std::endl;
+
+        const auto dimension = aSparseMatrix.getDimension();
+        const auto numValues = aSparseMatrix.getValuesNum();
+
+        int local = dimension;
+        int global = dimension;
+        if (dimension > deviceMaxWorkGroupSize)
+        {
+            local = deviceMaxWorkGroupSize;
+            global += (local - dimension % local);
+        }
+
+        std::vector<int> startIds(dimension);
+        std::vector<int> endIds(dimension);
+        std::vector<double> r(dimension);
+        std::vector<double> p(dimension);
+
+        double old_r_dot_r, new_r_dot_r, r_length;
+
+        std::vector<double> A_times_p(dimension);
+
+        std::vector<double> x(dimension);
+        std::vector<double> result(2);
+
+        double alpha;
+        int iterations = 0;
+
+        cl::Buffer startIdBuf(context, CL_MEM_READ_WRITE, dimension * sizeof(int));
+        cl::Buffer endIdBuf(context, CL_MEM_READ_WRITE, dimension * sizeof(int));
+
+        cl::Buffer xBuf(context, CL_MEM_READ_WRITE, dimension * sizeof(double));
+        cl::Buffer rBuf(context, CL_MEM_READ_WRITE, dimension * sizeof(double));
+        cl::Buffer pBuf(context, CL_MEM_READ_WRITE, dimension * sizeof(double));
+
+        cl::Buffer rowsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getRowIds()));
+        cl::Buffer colsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getColIds()));
+        cl::Buffer valuesBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(double), const_cast<double*>(aSparseMatrix.getValues()));
+        cl::Buffer bBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, dimension * sizeof(double), const_cast<double*>(aSparseMatrix.getVectorB()));
+        cl::Buffer resultBuf(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, 2 * sizeof(double));
+
+        cl::Buffer old_r_dot_r_Buf(context, CL_MEM_READ_WRITE, sizeof(double));
+        cl::Buffer new_r_dot_r_Buf(context, CL_MEM_READ_WRITE, sizeof(double));
+        cl::Buffer r_length_Buf(context, CL_MEM_READ_WRITE, sizeof(double));
+        cl::Buffer A_times_p_Buf(context, CL_MEM_READ_WRITE, dimension * sizeof(double));
+        cl::Buffer alpha_Buf(context, CL_MEM_READ_WRITE, sizeof(double));
+
+        init_kernel.setArg(0, sizeof(int), &numValues);
+        init_kernel.setArg(1, startIdBuf);
+        init_kernel.setArg(2, endIdBuf);
+        init_kernel.setArg(3, xBuf);
+        init_kernel.setArg(4, rBuf);
+        init_kernel.setArg(5, pBuf);
+        init_kernel.setArg(6, rowsBuf);
+        init_kernel.setArg(7, bBuf);
+
+        update_r_length_old_kernel.setArg(0, sizeof(int), &dimension);
+        update_r_length_old_kernel.setArg(1, rBuf);
+        update_r_length_old_kernel.setArg(2, old_r_dot_r_Buf);
+        update_r_length_old_kernel.setArg(3, r_length_Buf);
+
+        update_A_times_p_kernel.setArg(0, A_times_p_Buf);
+        update_A_times_p_kernel.setArg(1, startIdBuf);
+        update_A_times_p_kernel.setArg(2, endIdBuf);
+        update_A_times_p_kernel.setArg(3, valuesBuf);
+        update_A_times_p_kernel.setArg(4, pBuf);
+        update_A_times_p_kernel.setArg(5, colsBuf);
+
+        calculate_alpha_kernel.setArg(0, sizeof(int), &dimension);
+        calculate_alpha_kernel.setArg(1, old_r_dot_r_Buf);
+        calculate_alpha_kernel.setArg(2, A_times_p_Buf);
+        calculate_alpha_kernel.setArg(3, pBuf);
+        calculate_alpha_kernel.setArg(4, alpha_Buf);
+
+        update_guess_kernel.setArg(0, xBuf);
+        update_guess_kernel.setArg(1, rBuf);
+        update_guess_kernel.setArg(2, alpha_Buf);
+        update_guess_kernel.setArg(3, pBuf);
+        update_guess_kernel.setArg(4, A_times_p_Buf);
+
+        update_r_length_new_kernel.setArg(0, sizeof(int), &dimension);
+        update_r_length_new_kernel.setArg(1, rBuf);
+        update_r_length_new_kernel.setArg(2, new_r_dot_r_Buf);
+        update_r_length_new_kernel.setArg(3, r_length_Buf);
+
+        update_direction_kernel.setArg(0, old_r_dot_r_Buf);
+        update_direction_kernel.setArg(1, new_r_dot_r_Buf);
+        update_direction_kernel.setArg(2, rBuf);
+        update_direction_kernel.setArg(3, pBuf);
+
+        sync_r_dot_r_kernel.setArg(0, old_r_dot_r_Buf);
+        sync_r_dot_r_kernel.setArg(1, new_r_dot_r_Buf);
+
+        auto computeLinearSystem = [&]()
+        {
+            queue.enqueueNDRangeKernel(init_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
+
+            queue.enqueueNDRangeKernel(update_r_length_old_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
+            queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length);
+
+            while (iterations < 50000 && r_length >= 0.01)
+            {
+                queue.enqueueNDRangeKernel(update_A_times_p_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
+                queue.enqueueNDRangeKernel(calculate_alpha_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
+                queue.enqueueNDRangeKernel(update_guess_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
+                queue.enqueueNDRangeKernel(update_r_length_new_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
+                queue.enqueueNDRangeKernel(update_direction_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
+                queue.enqueueNDRangeKernel(sync_r_dot_r_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
+                queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length);
+                iterations++;
+            }
+
+            queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
+        };
+
+        const auto measuredTime = Time::compute(computeLinearSystem);
+
+        return { x, iterations, r_length, measuredTime };
+    }
+
+    Result steepestDescentGpu(const SparseMatrix& aSparseMatrix)
+    {
+        const auto dimension = aSparseMatrix.getDimension();
+        const auto numValues = aSparseMatrix.getValuesNum();
+
+        std::vector<double> x(dimension);
+        std::vector<double> result(2);
+
+        const auto [context, program, device] = initOpenCL("kernels/steepestDescent.cl");
+
+        cl::Kernel kernel(program, "steepestDescent");
+
+        int deviceMaxWorkGroupSize = device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
+        std::cout << "DEVICE_MAX_WORK_GROUP_SIZE: " << deviceMaxWorkGroupSize << std::endl << std::endl;
+        if (dimension > deviceMaxWorkGroupSize)
+        {
+            std::cerr << "Dimension of matrix is bigger than max work group size of the device" << std::endl;
+            exit(-3);
+        }
+
+        cl::Buffer rowsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getRowIds()));
+        cl::Buffer colsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getColIds()));
+        cl::Buffer valuesBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(double), const_cast<double*>(aSparseMatrix.getValues()));
+        cl::Buffer bBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, dimension * sizeof(double), const_cast<double*>(aSparseMatrix.getVectorB()));
+        cl::Buffer xBuf(context, CL_MEM_READ_WRITE, dimension * sizeof(double));
+        cl::Buffer resultBuf(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, 2 * sizeof(double));
+
+        kernel.setArg(0, sizeof(int), &dimension);
+        kernel.setArg(1, sizeof(int), &numValues);
+        kernel.setArg(2, cl::Local(dimension * sizeof(double)));
+        kernel.setArg(3, cl::Local(dimension * sizeof(double)));
+        kernel.setArg(4, rowsBuf);
+        kernel.setArg(5, colsBuf);
+        kernel.setArg(6, valuesBuf);
+        kernel.setArg(7, bBuf);
+        kernel.setArg(8, xBuf);
+        kernel.setArg(9, resultBuf);
+
+        cl::CommandQueue queue(context, device);
+
+        auto computeLinearSystem = [&]()
+        {
+            queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(dimension), cl::NDRange(dimension));
+
+            queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
+            queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data());
+        };
+
+        const auto measuredTime = Time::compute(computeLinearSystem);
+
+        return { x, static_cast<int>(result[0]), result[1], measuredTime };
     }
 
     Result Algorithms::conjugateGradientCpu(const SparseMatrix& aSparseMatrix)
@@ -100,7 +331,7 @@ namespace Algorithms
         double residualLength;
 
         auto computeLinearSystem = [
-                dim = aSparseMatrix.getDimension(),
+            dim = aSparseMatrix.getDimension(),
                 num_vals = aSparseMatrix.getValuesNum(),
                 rows = aSparseMatrix.getRowIds(),
                 cols = aSparseMatrix.getColIds(),
@@ -184,46 +415,6 @@ namespace Algorithms
             return { x, iterations, residualLength, measuredTime };
     }
 
-    Result Algorithms::conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
-    {
-        const auto dimension = aSparseMatrix.getDimension();
-        const auto numValues = aSparseMatrix.getValuesNum();
-
-        std::vector<double> x(dimension);
-        std::vector<double> result(2);
-
-        auto computeLinearSystem = [&](const cl::Context& context, cl::Kernel& kernel, cl::CommandQueue& queue)
-        {
-            cl::Buffer rowsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getRowIds()));
-            cl::Buffer colsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getColIds()));
-            cl::Buffer valuesBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(double), const_cast<double*>(aSparseMatrix.getValues()));
-            cl::Buffer bBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, dimension * sizeof(double), const_cast<double*>(aSparseMatrix.getVectorB()));
-            cl::Buffer xBuf(context, CL_MEM_READ_WRITE, dimension * sizeof(double));
-            cl::Buffer resultBuf(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, 2 * sizeof(double));
-
-            kernel.setArg(0, sizeof(int), &dimension);
-            kernel.setArg(1, sizeof(int), &numValues);
-            kernel.setArg(2, cl::Local(dimension * sizeof(double)));
-            kernel.setArg(3, cl::Local(dimension * sizeof(double)));
-            kernel.setArg(4, cl::Local(dimension * sizeof(double)));
-            kernel.setArg(5, rowsBuf);
-            kernel.setArg(6, colsBuf);
-            kernel.setArg(7, valuesBuf);
-            kernel.setArg(8, bBuf);
-            kernel.setArg(9, xBuf);
-            kernel.setArg(10, resultBuf);
-
-            queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(dimension), cl::NDRange(dimension));
-
-            queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
-            queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data());
-        };
-
-        const auto measuredTime = computeWithOpenCL("kernels/conjugateGradient.cl", computeLinearSystem);
-
-        return { x, static_cast<int>(result[0]), result[1], measuredTime };
-    }
-
     Result steepestDescentCpu(const SparseMatrix& aSparseMatrix)
     {
         std::vector<double> x(aSparseMatrix.getDimension());
@@ -231,7 +422,7 @@ namespace Algorithms
         double residualLength;
 
         auto computeLinearSystem = [
-                dim = aSparseMatrix.getDimension(),
+            dim = aSparseMatrix.getDimension(),
                 num_vals = aSparseMatrix.getValuesNum(),
                 rows = aSparseMatrix.getRowIds(),
                 cols = aSparseMatrix.getColIds(),
@@ -296,44 +487,5 @@ namespace Algorithms
             const auto measuredTime = Time::compute(computeLinearSystem);
 
             return { x, iterations, residualLength, measuredTime };
-    }
-
-    Result steepestDescentGpu(const SparseMatrix& aSparseMatrix)
-    {
-        const auto dimension = aSparseMatrix.getDimension();
-        const auto numValues = aSparseMatrix.getValuesNum();
-
-        std::vector<double> x(dimension);
-        std::vector<double> result(2);
-
-        auto computeLinearSystem = [&](const cl::Context& context, cl::Kernel& kernel, cl::CommandQueue& queue)
-        {
-            cl::Buffer rowsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getRowIds()));
-            cl::Buffer colsBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(int), const_cast<int*>(aSparseMatrix.getColIds()));
-            cl::Buffer valuesBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, numValues * sizeof(double), const_cast<double*>(aSparseMatrix.getValues()));
-            cl::Buffer bBuf(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, dimension * sizeof(double), const_cast<double*>(aSparseMatrix.getVectorB()));
-            cl::Buffer xBuf(context, CL_MEM_READ_WRITE, dimension * sizeof(double));
-            cl::Buffer resultBuf(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, 2 * sizeof(double));
-
-            kernel.setArg(0, sizeof(int), &dimension);
-            kernel.setArg(1, sizeof(int), &numValues);
-            kernel.setArg(2, cl::Local(dimension * sizeof(double)));
-            kernel.setArg(3, cl::Local(dimension * sizeof(double)));
-            kernel.setArg(4, rowsBuf);
-            kernel.setArg(5, colsBuf);
-            kernel.setArg(6, valuesBuf);
-            kernel.setArg(7, bBuf);
-            kernel.setArg(8, xBuf);
-            kernel.setArg(9, resultBuf);
-
-            queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(dimension), cl::NDRange(dimension));
-
-            queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
-            queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data());
-        };
-
-        const auto measuredTime = computeWithOpenCL("kernels/steepestDescent.cl", computeLinearSystem);
-
-        return { x, static_cast<int>(result[0]), result[1], measuredTime };
     }
 }

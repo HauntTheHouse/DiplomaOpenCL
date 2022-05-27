@@ -9,7 +9,8 @@
 int main()
 {
     std::string matrixFileName = "sparse_matrix_112.txt";
-    //std::string matrixFileName = "bcsstm12.mtx";
+    //std::string matrixFileName = "sparse_matrix_420.txt";
+    //std::string matrixFileName = "bcsstk17.mtx";
     SparseMatrix sparseMatrix("data/" + matrixFileName);
     sparseMatrix.fillVectorBWithValue(200.0);
 
@@ -19,7 +20,8 @@ int main()
     }
 
     //const auto result = Algorithms::conjugateGradientCpu(sparseMatrix);
-    const auto result = Algorithms::conjugateGradientGpu(sparseMatrix);
+    //const auto result = Algorithms::conjugateGradientGpu(sparseMatrix);
+    const auto result = Algorithms::conjugateGradientGpuScaled(sparseMatrix);
 
     for (const auto val : result.x)
     {
