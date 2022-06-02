@@ -81,7 +81,7 @@ namespace Algorithms
         }
     }
 
-    Result Algorithms::conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
+    Result conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
     {
         const auto dimension = aSparseMatrix.getDimension();
         const auto numValues = aSparseMatrix.getValuesNum();
@@ -163,6 +163,9 @@ namespace Algorithms
             local = deviceMaxWorkGroupSize;
             global += (local - dimension % local);
         }
+
+        std::cout << "local = " << local << std::endl;
+        std::cout << "global = " << global << std::endl;
 
         std::vector<int> startIds(dimension);
         std::vector<int> endIds(dimension);
@@ -253,6 +256,7 @@ namespace Algorithms
 
             while (iterations < 50000 && r_length >= 0.01)
             {
+                std::cout << "r_length = " << r_length << std::endl;
                 queue.enqueueNDRangeKernel(update_A_times_p_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
                 queue.enqueueNDRangeKernel(calculate_alpha_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
                 queue.enqueueNDRangeKernel(update_guess_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
@@ -324,7 +328,7 @@ namespace Algorithms
         return { x, static_cast<int>(result[0]), result[1], measuredTime };
     }
 
-    Result Algorithms::conjugateGradientCpu(const SparseMatrix& aSparseMatrix)
+    Result conjugateGradientCpu(const SparseMatrix& aSparseMatrix)
     {
         std::vector<double> x(aSparseMatrix.getDimension());
         int iterations;
