@@ -6,7 +6,6 @@
 
 #include "SparseMatrix.h"
 #include "Utils.h"
-#include "Time.h"
 
 namespace Algorithms
 {
@@ -83,8 +82,8 @@ namespace Algorithms
 
     Result conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
     {
-        const auto dimension = aSparseMatrix.getDimension();
-        const auto numValues = aSparseMatrix.getValuesNum();
+        const int dimension = aSparseMatrix.getDimension();
+        const int numValues = aSparseMatrix.getValuesNum();
 
         std::vector<double> x(dimension);
         std::vector<double> result(2);
@@ -130,7 +129,7 @@ namespace Algorithms
             queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data());
         };
 
-        const auto measuredTime = Time::compute(computeLinearSystem);
+        const auto measuredTime = Timer::computeTime(computeLinearSystem);
 
         return { x, static_cast<int>(result[0]), result[1], measuredTime };
     }
@@ -153,8 +152,8 @@ namespace Algorithms
         int deviceMaxWorkGroupSize = device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
         std::cout << "DEVICE_MAX_WORK_GROUP_SIZE: " << deviceMaxWorkGroupSize << std::endl << std::endl;
 
-        const auto dimension = aSparseMatrix.getDimension();
-        const auto numValues = aSparseMatrix.getValuesNum();
+        const int dimension = aSparseMatrix.getDimension();
+        const int numValues = aSparseMatrix.getValuesNum();
 
         int local = dimension;
         int global = dimension;
@@ -163,9 +162,6 @@ namespace Algorithms
             local = deviceMaxWorkGroupSize;
             global += (local - dimension % local);
         }
-
-        std::cout << "local = " << local << std::endl;
-        std::cout << "global = " << global << std::endl;
 
         std::vector<int> startIds(dimension);
         std::vector<int> endIds(dimension);
@@ -256,7 +252,6 @@ namespace Algorithms
 
             while (iterations < 50000 && r_length >= 0.01)
             {
-                std::cout << "r_length = " << r_length << std::endl;
                 queue.enqueueNDRangeKernel(update_A_times_p_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
                 queue.enqueueNDRangeKernel(calculate_alpha_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
                 queue.enqueueNDRangeKernel(update_guess_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
@@ -270,15 +265,15 @@ namespace Algorithms
             queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
         };
 
-        const auto measuredTime = Time::compute(computeLinearSystem);
+        const auto measuredTime = Timer::computeTime(computeLinearSystem);
 
         return { x, iterations, r_length, measuredTime };
     }
 
     Result steepestDescentGpu(const SparseMatrix& aSparseMatrix)
     {
-        const auto dimension = aSparseMatrix.getDimension();
-        const auto numValues = aSparseMatrix.getValuesNum();
+        const int dimension = aSparseMatrix.getDimension();
+        const int numValues = aSparseMatrix.getValuesNum();
 
         std::vector<double> x(dimension);
         std::vector<double> result(2);
@@ -323,7 +318,7 @@ namespace Algorithms
             queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data());
         };
 
-        const auto measuredTime = Time::compute(computeLinearSystem);
+        const auto measuredTime = Timer::computeTime(computeLinearSystem);
 
         return { x, static_cast<int>(result[0]), result[1], measuredTime };
     }
@@ -414,7 +409,7 @@ namespace Algorithms
                 residualLength = r_length;
             };
 
-            const auto measuredTime = Time::compute(computeLinearSystem);
+            const auto measuredTime = Timer::computeTime(computeLinearSystem);
 
             return { x, iterations, residualLength, measuredTime };
     }
@@ -488,7 +483,7 @@ namespace Algorithms
                 residualLength = r_length;
             };
 
-            const auto measuredTime = Time::compute(computeLinearSystem);
+            const auto measuredTime = Timer::computeTime(computeLinearSystem);
 
             return { x, iterations, residualLength, measuredTime };
     }

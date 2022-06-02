@@ -4,13 +4,13 @@
 #include <unordered_map>
 #include <string>
 
-namespace Time
+namespace Timer
 {
     enum class Measure
     {
         NANOSECONDS,
         MICROSECONDS,
-        MILISECONDS,
+        MILLISECONDS,
         SECONDS,
     };
 
@@ -21,7 +21,7 @@ namespace Time
     };
 
     template<typename T, typename ...Args>
-    ComputedTime compute(T&& funcToCompute, Args&&... arguments)
+    ComputedTime computeTime(T&& funcToCompute, Args&&... arguments)
     {
         const auto start = std::chrono::steady_clock::now();
         funcToCompute(arguments...);
@@ -50,8 +50,8 @@ namespace Time
             return "nanoseconds";
         case Measure::MICROSECONDS:
             return "microseconds";
-        case Measure::MILISECONDS:
-            return "miliseconds";
+        case Measure::MILLISECONDS:
+            return "milliseconds";
         case Measure::SECONDS:
             return "seconds";
         default:

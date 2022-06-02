@@ -31,5 +31,5 @@ int main()
 
     std::cout << "Iterations: " << result.iterationNum << std::endl;
     std::cout << "Residual length: " << result.residualLength << std::endl << std::endl;
-    std::cout << "Compute time: " << result.computeTime.value << " " << Time::toString(result.computeTime.measure) << std::endl;
+    std::cout << "Compute time: " << result.computedTime.value << " " << Timer::toString(result.computedTime.measure) << std::endl;
 }

@@ -1,8 +1,7 @@
 #pragma once
 
 #include <vector>
-
-#include "Time.h"
+#include "Timer.h"
 
 class SparseMatrix;
 
@@ -13,7 +12,7 @@ namespace Algorithms
 		std::vector<double> x;
 		int iterationNum;
 		double residualLength;
-		Time::ComputedTime computeTime;
+		Timer::ComputedTime computedTime;
 	};
 
 	Result conjugateGradientCpu(const SparseMatrix& aSparseMatrix);
