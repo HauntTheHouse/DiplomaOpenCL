@@ -45,20 +45,19 @@ namespace
             for (const auto& dev : devices)
             {
                 std::cout << '\t' << dev.getInfo<CL_DEVICE_NAME>() << std::endl;
-                std::cout << "\tMAX_WORK_GROUP_SIZE: " << dev.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>() << std::endl;
-                std::cout << "\tMAX_COMPUTE_UNITS: " << dev.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << std::endl;
+                std::cout << "\t\tMAX_WORK_GROUP_SIZE: " << dev.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>() << std::endl;
+                std::cout << "\t\tMAX_COMPUTE_UNITS: " << dev.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << std::endl;
             }
         }
 
-        std::cout << "\nSelect option: ";
-        int chosenPlatform;
-        Utils::enterValue(chosenPlatform, 1, (int)platforms.size());
+        const int chosenPlatform = Utils::selectOption(1, platforms.size());
+
         auto& platform = platforms[chosenPlatform - 1];
         std::cout << std::endl << "Using platform: " << platform.getInfo<CL_PLATFORM_NAME>() << std::endl;
 
         std::vector<cl::Device> devices;
         platform.getDevices(CL_DEVICE_TYPE_ALL, &devices);
-        device = devices.back();
+        device = devices.front();
         std::cout << "Using device: " << device.getInfo<CL_DEVICE_NAME>() << std::endl;
 
         std::string src = Utils::readFileToString(aPathToKernel);
@@ -99,7 +98,7 @@ Result conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
     int deviceMaxWorkGroupSize = device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
     if (dimension > deviceMaxWorkGroupSize)
     {
-        std::cerr << "Dimension of matrix is bigger than max work group size of the device. Use scaledConjugateGradientGpu() algorithm instead" << std::endl;
+        std::cerr << "\nDimension of matrix is bigger than max work group size of the device. Use scaledConjugateGradientGpu() algorithm instead" << std::endl;
         exit(-3);
     }
 

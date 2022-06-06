@@ -3,7 +3,6 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
-#include <filesystem>
 
 namespace Utils
 {
@@ -16,23 +15,30 @@ std::string readFileToString(const std::string& aFileName)
     return srcStream.str();
 }
 
-std::string selectFileInDirectory(const std::string& aDirectoryPath)
+int getNumFilesInDirectory(const std::filesystem::directory_iterator& aDirectory)
+{
+    int i = 0;
+    for (const auto& file : aDirectory) ++i;
+
+    return i;
+}
+
+void printFilesInDirectory(const std::filesystem::directory_iterator& aDirectory)
 {
     int i = 1;
-    for (const auto& file : std::filesystem::directory_iterator(aDirectoryPath))
+    for (const auto& file : aDirectory)
     {
         const auto path = file.path().string();
         std::cout << i++ << ". " << path.substr(path.find_last_of('/') + 1) << '\n';
     }
+}
 
-    std::cout << "\nSelect option: ";
-    int num;
-    enterValue(num, 1, i - 1);
-
-    i = 1;
-    for (const auto& file : std::filesystem::directory_iterator(aDirectoryPath))
+std::string getFileNameByIdInDirectory(const std::filesystem::directory_iterator& aDirectory, int aId)
+{
+    int i = 1;
+    for (const auto& file : aDirectory)
     {
-        if (i++ == num)
+        if (i++ == aId)
             return file.path().string();
     }
 }
@@ -53,5 +59,13 @@ void enterValue(T& choose, T leftLimit, T rightLimit)
 }
 template void Utils::enterValue<int>(int&, int, int);
 template void Utils::enterValue<double>(double&, double, double);
+
+int selectOption(int aLeftLimit, int aRightLimit)
+{
+    std::cout << "\nSelect option: ";
+    int chosenOption;
+    Utils::enterValue(chosenOption, aLeftLimit, aRightLimit);
+    return chosenOption;
+}
 
 }

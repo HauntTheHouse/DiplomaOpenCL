@@ -7,7 +7,7 @@ __kernel void conjugateGradient(int dim, int num_vals,
 
     local double alpha, r_length, old_r_dot_r, new_r_dot_r;
     local int iteration;
-    
+
     int start_index = -1;
     int end_index = -1;
     double Ap_dot_p;

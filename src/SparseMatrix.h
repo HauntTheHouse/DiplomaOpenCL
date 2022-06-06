@@ -7,7 +7,8 @@
 class SparseMatrix
 {
 public:
-    explicit SparseMatrix(const std::string& pathToMatrix);
+    SparseMatrix() = default;
+    SparseMatrix(const std::string& pathToMatrix);
     ~SparseMatrix();
 
     void open(const std::string& pathToMatrix);
