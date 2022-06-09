@@ -1,28 +1,27 @@
 #pragma once
 
 #include <string>
-#include <fstream>
 #include <vector>
 
 class SparseMatrix
 {
 public:
     SparseMatrix() = default;
-    SparseMatrix(const std::string& pathToMatrix);
+    SparseMatrix(const std::string& aPathToMatrix);
     ~SparseMatrix();
 
-    void open(const std::string& pathToMatrix);
+    void open(const std::string& aPathToMatrix);
     void clear();
 
-    void print(std::ostream& stream);
+    void print(std::ostream& aStream);
 
-    int getDimension() const { return m_Dimension; }
-    int getValuesNum() const { return m_NumValues; }
+    int getDimension() const { return mDimension; }
+    int getValuesNum() const { return mNumValues; }
 
-    const int* getRowIds() const { return m_RowIds.data(); }
-    const int* getColIds() const { return m_ColIds.data(); }
-    const double* getValues() const { return m_Values.data(); }
-    const double* getVectorB() const { return m_B.data(); }
+    const int* getRowIds() const { return mRowIds.data(); }
+    const int* getColIds() const { return mColIds.data(); }
+    const double* getValues() const { return mValues.data(); }
+    const double* getVectorB() const { return mB.data(); }
 
     void fillVectorBWithRandomValues(double minValue, double maxValue);
     void fillVectorBWithValue(double value);
@@ -38,16 +37,14 @@ private:
     inline static const std::string SYMMETRIC{"symmetric"};
     inline static const std::string GENERAL{"general"};
 
-    std::ifstream m_MatrixFile;
+    bool mIsReal{ true };
+    bool mIsSymmetric{ false };
 
-    bool m_IsReal{ true };
-    bool m_IsSymmetric{ false };
+    int mDimension{ 0 };
+    int mNumValues{ 0 };
 
-    int m_Dimension{ 0 };
-    int m_NumValues{ 0 };
-
-    std::vector<int> m_RowIds;
-    std::vector<int> m_ColIds;
-    std::vector<double> m_Values;
-    std::vector<double> m_B;
+    std::vector<int> mRowIds;
+    std::vector<int> mColIds;
+    std::vector<double> mValues;
+    std::vector<double> mB;
 };

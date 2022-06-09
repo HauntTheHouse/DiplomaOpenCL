@@ -1,9 +1,10 @@
 #include "SparseMatrix.h"
 
 #include <sstream>
+#include <fstream>
+#include <iostream>
 #include <ctime>
 #include <cassert>
-#include <iostream>
 
 SparseMatrix::SparseMatrix(const std::string& pathToMatrix)
 {
@@ -19,12 +20,12 @@ void SparseMatrix::open(const std::string& pathToMatrix)
 {
     clear();
 
-    m_MatrixFile.open(pathToMatrix);
-    if (!m_MatrixFile.is_open())
+    std::ifstream matrixFile(pathToMatrix);
+    if (!matrixFile.is_open())
         throw std::invalid_argument("This file doesn't exist");
 
     std::string header;
-    std::getline(m_MatrixFile, header);
+    std::getline(matrixFile, header);
     std::stringstream headerStream(header);
 
     if (header.front() == '%')
@@ -44,87 +45,85 @@ void SparseMatrix::open(const std::string& pathToMatrix)
 
         headerStream >> str;
         if (str == REAL)
-            m_IsReal = true;
+            mIsReal = true;
         else if (str == COMPLEX)
-            m_IsReal = false;
+            mIsReal = false;
         else
             throw std::invalid_argument("Matrix should has real or complex numbers");
 
         headerStream >> str;
         if (str == SYMMETRIC)
-            m_IsSymmetric = true;
+            mIsSymmetric = true;
         else if (str == GENERAL)
-            m_IsReal = false;
+            mIsReal = false;
         else
             throw std::invalid_argument("Matrix should be symmetric or general");
 
-        std::getline(m_MatrixFile, header);
+        std::getline(matrixFile, header);
         headerStream = std::stringstream(header);
     }
 
     int rowNum, colNum;
-    headerStream >> rowNum >> colNum >> m_NumValues;
+    headerStream >> rowNum >> colNum >> mNumValues;
     assert(rowNum == colNum);
-    m_Dimension = rowNum;
+    mDimension = rowNum;
 
-    if (m_IsSymmetric)
-        m_NumValues = m_NumValues * 2 - m_Dimension;
+    if (mIsSymmetric)
+        mNumValues = mNumValues * 2 - mDimension;
 
-    m_RowIds.reserve(m_NumValues);
-    m_ColIds.reserve(m_NumValues);
-    m_Values.reserve(m_NumValues);
-    m_B.reserve(m_Dimension);
+    mRowIds.reserve(mNumValues);
+    mColIds.reserve(mNumValues);
+    mValues.reserve(mNumValues);
+    mB.reserve(mDimension);
 
     bool toSort = false;
-    while (!m_MatrixFile.eof())
+    while (!matrixFile.eof())
     {
         int rowId, colId;
         double value;
-        m_MatrixFile >> rowId >> colId >> value;
+        matrixFile >> rowId >> colId >> value;
 
-//        if (!toSort && !m_RowIds.empty() && rowId < m_RowIds.back())
+//        if (!toSort && !mRowIds.empty() && rowId < mRowIds.back())
 //            toSort = true;
 
-        m_RowIds.push_back(rowId - 1);
-        m_ColIds.push_back(colId - 1);
-        m_Values.push_back(value);
+        mRowIds.push_back(rowId - 1);
+        mColIds.push_back(colId - 1);
+        mValues.push_back(value);
 
-        if (m_IsSymmetric && rowId != colId)
+        if (mIsSymmetric && rowId != colId)
         {
-            m_RowIds.push_back(colId - 1);
-            m_ColIds.push_back(rowId - 1);
-            m_Values.push_back(value);
+            mRowIds.push_back(colId - 1);
+            mColIds.push_back(rowId - 1);
+            mValues.push_back(value);
         }
     }
 
-    if (m_IsSymmetric)
+    if (mIsSymmetric)
         sort();
-
-    m_MatrixFile.close();
 }
 
 void SparseMatrix::clear()
 {
-    m_RowIds.clear();
-    m_ColIds.clear();
-    m_Values.clear();
-    m_B.clear();
+    mRowIds.clear();
+    mColIds.clear();
+    mValues.clear();
+    mB.clear();
 }
 
 void SparseMatrix::fillVectorBWithRandomValues(double minValue, double maxValue)
 {
     srand(time(nullptr));
-    for (int i = 0; i < m_Dimension; ++i)
+    for (int i = 0; i < mDimension; ++i)
     {
-        m_B.push_back(rand() / static_cast<double>(RAND_MAX) * (maxValue - minValue) + minValue);
+        mB.push_back(rand() / static_cast<double>(RAND_MAX) * (maxValue - minValue) + minValue);
     }
 }
 
 void SparseMatrix::fillVectorBWithValue(double value)
 {
-    for (int i = 0; i < m_Dimension; ++i)
+    for (int i = 0; i < mDimension; ++i)
     {
-        m_B.push_back(value);
+        mB.push_back(value);
     }
 }
 
@@ -132,11 +131,11 @@ void SparseMatrix::sort()
 {
     int int_swap, index = 0;
     double double_swap;
-    for(int i = 0; i < m_NumValues; i++)
+    for(int i = 0; i < mNumValues; i++)
     {
-        for(int j = index; j < m_NumValues; j++)
+        for(int j = index; j < mNumValues; j++)
         {
-            if(m_RowIds[j] == i)
+            if(mRowIds[j] == i)
             {
                 if(j == index)
                 {
@@ -144,15 +143,15 @@ void SparseMatrix::sort()
                 }
                 else if(j > index)
                 {
-                    int_swap = m_RowIds[index];
-                    m_RowIds[index] = m_RowIds[j];
-                    m_RowIds[j] = int_swap;
-                    int_swap = m_ColIds[index];
-                    m_ColIds[index] = m_ColIds[j];
-                    m_ColIds[j] = int_swap;
-                    double_swap = m_Values[index];
-                    m_Values[index] = m_Values[j];
-                    m_Values[j] = double_swap;
+                    int_swap = mRowIds[index];
+                    mRowIds[index] = mRowIds[j];
+                    mRowIds[j] = int_swap;
+                    int_swap = mColIds[index];
+                    mColIds[index] = mColIds[j];
+                    mColIds[j] = int_swap;
+                    double_swap = mValues[index];
+                    mValues[index] = mValues[j];
+                    mValues[j] = double_swap;
                     index++;
                 }
             }
@@ -163,9 +162,9 @@ void SparseMatrix::sort()
 void SparseMatrix::print(std::ostream& stream)
 {
     stream.precision(14);
-    stream << m_Dimension << ' ' << m_Dimension << ' ' << m_NumValues << '\n';
-    for (int i = 0; i < m_NumValues; ++i)
+    stream << mDimension << ' ' << mDimension << ' ' << mNumValues << '\n';
+    for (int i = 0; i < mNumValues; ++i)
     {
-        stream << m_RowIds[i] << ' ' << m_ColIds[i] << ' ' << m_Values[i] << '\n';
+        stream << mRowIds[i] << ' ' << mColIds[i] << ' ' << mValues[i] << '\n';
     }
 }
