@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <optional>
 #include "Timer.h"
 
 class SparseMatrix;
@@ -13,6 +14,7 @@ namespace Algorithms
 		int iterationNum;
 		double residualLength;
 		Timer::ComputedTime computedTime;
+		std::optional<Timer::ComputedTime> trueComputedTime;
 	};
 
 	Result conjugateGradientGpu(const SparseMatrix& aSparseMatrix);

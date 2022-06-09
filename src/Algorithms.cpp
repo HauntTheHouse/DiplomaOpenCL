@@ -81,6 +81,12 @@ namespace
         std::cout << "\nSolving of SLAE..." << std::endl;
         return { context, program, device };
     }
+
+    cl_ulong getComputeTime(const cl::Event& event)
+    {
+        event.wait();
+        return event.getProfilingInfo<CL_PROFILING_COMMAND_END>() - event.getProfilingInfo<CL_PROFILING_COMMAND_START>();
+    }
 }
 
 Result conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
@@ -121,19 +127,25 @@ Result conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
     kernel.setArg(9, xBuf);
     kernel.setArg(10, resultBuf);
 
-    cl::CommandQueue queue(context, device);
+    cl::CommandQueue queue(context, device, cl::QueueProperties::Profiling);
+
+
+    cl_ulong kernelWorkTime = 0;
 
     auto computeLinearSystem = [&]()
     {
-        queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(dimension), cl::NDRange(dimension));
+        cl::Event event;
+        queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(dimension), cl::NDRange(dimension), nullptr, &event);
+        kernelWorkTime += getComputeTime(event);
 
         queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
         queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data());
     };
 
     const auto measuredTime = Timer::computeTime(computeLinearSystem);
+    const auto trueMeasuredTime = Timer::convertNanosecondsToAppropriateMeasure(kernelWorkTime);
 
-    return { x, static_cast<int>(result[0]), result[1], measuredTime };
+    return { x, static_cast<int>(result[0]), result[1], measuredTime, trueMeasuredTime };
 }
 
 Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
@@ -149,7 +161,7 @@ Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
     cl::Kernel update_direction_kernel(program, "update_direction");
     cl::Kernel sync_r_dot_r_kernel(program, "sync_r_dot_r");
 
-    cl::CommandQueue queue = cl::CommandQueue(context, device);
+    cl::CommandQueue queue = cl::CommandQueue(context, device, cl::QueueProperties::Profiling);
 
     int deviceMaxWorkGroupSize = device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
 
@@ -244,21 +256,39 @@ Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
     sync_r_dot_r_kernel.setArg(0, old_r_dot_r_Buf);
     sync_r_dot_r_kernel.setArg(1, new_r_dot_r_Buf);
 
+    cl_ulong kernelWorkTime = 0;
+
     auto computeLinearSystem = [&]()
     {
-        queue.enqueueNDRangeKernel(init_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
+        cl::Event event;
+        queue.enqueueNDRangeKernel(init_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
+        kernelWorkTime += getComputeTime(event);
 
-        queue.enqueueNDRangeKernel(update_r_length_old_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
+        queue.enqueueNDRangeKernel(update_r_length_old_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
+        kernelWorkTime += getComputeTime(event);
+
         queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length);
 
         while (iterations < 50000 && r_length >= 0.01)
         {
-            queue.enqueueNDRangeKernel(update_A_times_p_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
-            queue.enqueueNDRangeKernel(calculate_alpha_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
-            queue.enqueueNDRangeKernel(update_guess_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
-            queue.enqueueNDRangeKernel(update_r_length_new_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
-            queue.enqueueNDRangeKernel(update_direction_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local));
-            queue.enqueueNDRangeKernel(sync_r_dot_r_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1));
+            queue.enqueueNDRangeKernel(update_A_times_p_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
+            kernelWorkTime += getComputeTime(event);
+
+            queue.enqueueNDRangeKernel(calculate_alpha_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
+            kernelWorkTime += getComputeTime(event);
+
+            queue.enqueueNDRangeKernel(update_guess_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
+            kernelWorkTime += getComputeTime(event);
+
+            queue.enqueueNDRangeKernel(update_r_length_new_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
+            kernelWorkTime += getComputeTime(event);
+
+            queue.enqueueNDRangeKernel(update_direction_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
+            kernelWorkTime += getComputeTime(event);
+
+            queue.enqueueNDRangeKernel(sync_r_dot_r_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
+            kernelWorkTime += getComputeTime(event);
+
             queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length);
             iterations++;
         }
@@ -267,8 +297,9 @@ Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
     };
 
     const auto measuredTime = Timer::computeTime(computeLinearSystem);
+    const auto trueMeasuredTime = Timer::convertNanosecondsToAppropriateMeasure(kernelWorkTime);
 
-    return { x, iterations, r_length, measuredTime };
+    return { x, iterations, r_length, measuredTime, trueMeasuredTime };
 }
 
 Result steepestDescentGpu(const SparseMatrix& aSparseMatrix)

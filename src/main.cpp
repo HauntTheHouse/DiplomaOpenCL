@@ -25,7 +25,7 @@ int main()
     // Here is the choice of how to fill the vector b in Ax = b
     std::cout << "\n\nFill vector b:" << std::endl;
     std::cout << "1. With random values" << std::endl;
-    std::cout << "2. With concrete values" << std::endl;
+    std::cout << "2. With concrete value" << std::endl;
 
     const int chosenFillVector = Utils::selectOption(1, 2);
 
@@ -81,9 +81,13 @@ int main()
     std::cout << "Iterations: " << result.iterationNum << std::endl;
     std::cout << "Residual length: " << result.residualLength << std::endl << std::endl;
     std::cout << "Compute time: " << result.computedTime.value << " " << Timer::toString(result.computedTime.measure) << std::endl;
+    if (result.trueComputedTime.has_value())
+    {
+        std::cout << "Compute time without reading and writing buffers: " << result.trueComputedTime.value().value << " " << Timer::toString(result.trueComputedTime.value().measure) << std::endl;
+    }
 
-    char endSession;
-    std::cin >> endSession;
+    //char endSession;
+    //std::cin >> endSession;
 
     return 0;
 }
