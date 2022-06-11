@@ -23,4 +23,6 @@ namespace Algorithms
 
 	Result steepestDescentGpu(const SparseMatrix& aSparseMatrix);
 	Result steepestDescentCpu(const SparseMatrix& aSparseMatrix);
+
+	std::vector<double> matrixVectorMultiplication(const SparseMatrix& aSparseMatrix, const std::vector<double>& aVector);
 }

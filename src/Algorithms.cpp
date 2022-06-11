@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <string>
+#include <cassert>
 #include <CL/opencl.hpp>
 
 #include "SparseMatrix.h"
@@ -518,6 +519,36 @@ Result steepestDescentCpu(const SparseMatrix& aSparseMatrix)
     const auto measuredTime = Timer::computeTime(computeLinearSystem);
 
     return { x, iterations, residualLength, measuredTime };
+}
+
+std::vector<double> matrixVectorMultiplication(const SparseMatrix& aSparseMatrix, const std::vector<double>& aVector)
+{
+    assert(aSparseMatrix.getDimension() == aVector.size());
+    std::vector<double> result;
+    result.reserve(aVector.size());
+
+    const int* rows = aSparseMatrix.getRowIds();
+    const int* cols = aSparseMatrix.getColIds();
+    const double* vals = aSparseMatrix.getValues();
+
+    int activeRowId = 0;
+    double value = 0.0;
+    for (size_t i = 0; i < aSparseMatrix.getValuesNum();)
+    {
+        if (rows[i] == activeRowId)
+        {
+            value += vals[i] * aVector[cols[i]];
+            i++;
+        }
+        else
+        {
+            activeRowId = rows[i];
+            result.push_back(value);
+            value = 0.0;
+        }
+    }
+
+    return result;
 }
 
 }
