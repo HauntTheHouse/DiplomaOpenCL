@@ -88,11 +88,7 @@ int main()
 
     std::cout << "Iterations: " << result.iterationNum << std::endl;
     std::cout << "Residual length: " << result.residualLength << std::endl << std::endl;
-    std::cout << "Compute time: " << result.computedTime.value << " " << Timer::toString(result.computedTime.measure) << std::endl;
-    if (result.trueComputedTime.has_value())
-    {
-        std::cout << "Compute time without reading and writing buffers: " << result.trueComputedTime.value().value << " " << Timer::toString(result.trueComputedTime.value().measure) << std::endl;
-    }
+    std::cout << *result.timeInfo;
 
     return 0;
 }

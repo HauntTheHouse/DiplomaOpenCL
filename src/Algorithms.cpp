@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <chrono>
 #include <CL/opencl.hpp>
 
 #include "SparseMatrix.h"
@@ -131,22 +132,28 @@ Result conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
     cl::CommandQueue queue(context, device, cl::QueueProperties::Profiling);
 
 
-    cl_ulong kernelWorkTime = 0;
+    cl_ulong kernel_compute_time = 0;
+    cl_ulong read_buffer_time = 0;
 
     auto computeLinearSystem = [&]()
     {
         cl::Event event;
         queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(dimension), cl::NDRange(dimension), nullptr, &event);
-        kernelWorkTime += getComputeTime(event);
+        kernel_compute_time += getComputeTime(event);
 
-        queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
-        queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data());
+        queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data(), nullptr, &event);
+        read_buffer_time += getComputeTime(event);
+        queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data(), nullptr, &event);
+        read_buffer_time += getComputeTime(event);
     };
 
-    const auto measuredTime = Timer::computeTime(computeLinearSystem);
-    const auto trueMeasuredTime = Timer::convertNanosecondsToAppropriateMeasure(kernelWorkTime);
+    auto timeInfo = std::make_unique<NonScaledTimeInfo>();
+    timeInfo->total_compute_time  = Timer::computeTime(computeLinearSystem);
+    timeInfo->total_kernel_time   = Timer::convertNanosecondsToAppropriateMeasure(kernel_compute_time + read_buffer_time);
+    timeInfo->kernel_compute_time = Timer::convertNanosecondsToAppropriateMeasure(kernel_compute_time);
+    timeInfo->read_buffer_time    = Timer::convertNanosecondsToAppropriateMeasure(read_buffer_time);
 
-    return { x, static_cast<int>(result[0]), result[1], measuredTime, trueMeasuredTime };
+    return { x, static_cast<int>(result[0]), result[1], std::move(timeInfo) };
 }
 
 Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
@@ -257,50 +264,76 @@ Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
     sync_r_dot_r_kernel.setArg(0, old_r_dot_r_Buf);
     sync_r_dot_r_kernel.setArg(1, new_r_dot_r_Buf);
 
-    cl_ulong kernelWorkTime = 0;
+    cl_ulong init_time = 0;
+    cl_ulong update_r_length_old_time = 0;
+    cl_ulong update_A_times_p_time = 0;
+    cl_ulong calc_alpha_time = 0;
+    cl_ulong update_guess_time = 0;
+    cl_ulong update_r_length_new_time = 0;
+    cl_ulong update_direction_time = 0;
+    cl_ulong sync_r_dot_r_time = 0;
+    cl_ulong read_buffers_time = 0;
+    cl_ulong total_kernel_time = 0;
 
     auto computeLinearSystem = [&]()
     {
         cl::Event event;
         queue.enqueueNDRangeKernel(init_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
-        kernelWorkTime += getComputeTime(event);
+        init_time += getComputeTime(event);
 
         queue.enqueueNDRangeKernel(update_r_length_old_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
-        kernelWorkTime += getComputeTime(event);
+        update_r_length_old_time += getComputeTime(event);
 
-        queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length);
+        queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length, nullptr, &event);
+        read_buffers_time += getComputeTime(event);
 
         while (iterations < 50000 && r_length >= 0.01)
         {
             queue.enqueueNDRangeKernel(update_A_times_p_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
-            kernelWorkTime += getComputeTime(event);
+            update_A_times_p_time += getComputeTime(event);
 
             queue.enqueueNDRangeKernel(calculate_alpha_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
-            kernelWorkTime += getComputeTime(event);
+            calc_alpha_time += getComputeTime(event);
 
             queue.enqueueNDRangeKernel(update_guess_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
-            kernelWorkTime += getComputeTime(event);
+            update_guess_time += getComputeTime(event);
 
             queue.enqueueNDRangeKernel(update_r_length_new_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
-            kernelWorkTime += getComputeTime(event);
+            update_r_length_new_time += getComputeTime(event);
 
             queue.enqueueNDRangeKernel(update_direction_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
-            kernelWorkTime += getComputeTime(event);
+            update_direction_time += getComputeTime(event);
 
             queue.enqueueNDRangeKernel(sync_r_dot_r_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
-            kernelWorkTime += getComputeTime(event);
+            sync_r_dot_r_time += getComputeTime(event);
 
-            queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length);
+            queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length, nullptr, &event);
+            read_buffers_time += getComputeTime(event);
+
             iterations++;
         }
 
         queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
+        read_buffers_time += getComputeTime(event);
+
+        total_kernel_time = init_time + update_r_length_old_time + update_A_times_p_time + calc_alpha_time + update_guess_time + update_r_length_new_time + update_direction_time + sync_r_dot_r_time + read_buffers_time;
     };
 
-    const auto measuredTime = Timer::computeTime(computeLinearSystem);
-    const auto trueMeasuredTime = Timer::convertNanosecondsToAppropriateMeasure(kernelWorkTime);
 
-    return { x, iterations, r_length, measuredTime, trueMeasuredTime };
+    auto timeInfo = std::make_unique<ScaledTimeInfo>();
+    timeInfo->total_compute_time       = Timer::computeTime(computeLinearSystem);
+    timeInfo->total_kernel_time        = Timer::convertNanosecondsToAppropriateMeasure(total_kernel_time);
+    timeInfo->init_time                = Timer::convertNanosecondsToAppropriateMeasure(init_time);
+    timeInfo->update_r_length_old_time = Timer::convertNanosecondsToAppropriateMeasure(update_r_length_old_time);
+    timeInfo->update_A_times_p_time    = Timer::convertNanosecondsToAppropriateMeasure(update_A_times_p_time);
+    timeInfo->calc_alpha_time          = Timer::convertNanosecondsToAppropriateMeasure(calc_alpha_time);
+    timeInfo->update_guess_time        = Timer::convertNanosecondsToAppropriateMeasure(update_guess_time);
+    timeInfo->update_r_length_new_time = Timer::convertNanosecondsToAppropriateMeasure(update_r_length_new_time);
+    timeInfo->update_direction_time    = Timer::convertNanosecondsToAppropriateMeasure(update_direction_time);
+    timeInfo->sync_r_dot_r_time        = Timer::convertNanosecondsToAppropriateMeasure(sync_r_dot_r_time);
+    timeInfo->read_buffers_time        = Timer::convertNanosecondsToAppropriateMeasure(read_buffers_time);
+
+    return { x, iterations, r_length, std::move(timeInfo) };
 }
 
 Result steepestDescentGpu(const SparseMatrix& aSparseMatrix)
@@ -351,100 +384,155 @@ Result steepestDescentGpu(const SparseMatrix& aSparseMatrix)
         queue.enqueueReadBuffer(resultBuf, CL_TRUE, 0, result.size() * sizeof(double), result.data());
     };
 
-    const auto measuredTime = Timer::computeTime(computeLinearSystem);
+    auto timeInfo = std::make_unique<TimeInfo>();
+    timeInfo->total_compute_time = Timer::computeTime(computeLinearSystem);
 
-    return { x, static_cast<int>(result[0]), result[1], measuredTime };
+    return { x, static_cast<int>(result[0]), result[1], std::move(timeInfo) };
 }
 
 Result conjugateGradientCpu(const SparseMatrix& aSparseMatrix)
 {
+    const int dim = aSparseMatrix.getDimension();
+    const int num_vals = aSparseMatrix.getValuesNum();
+    const int* rows = aSparseMatrix.getRowIds();
+    const int* cols = aSparseMatrix.getColIds();
+    const double* A = aSparseMatrix.getValues();
+    const double* b = aSparseMatrix.getVectorB();
+
     std::vector<double> x(aSparseMatrix.getDimension());
     int iterations;
     double residualLength;
 
-    auto computeLinearSystem = [
-        dim = aSparseMatrix.getDimension(),
-            num_vals = aSparseMatrix.getValuesNum(),
-            rows = aSparseMatrix.getRowIds(),
-            cols = aSparseMatrix.getColIds(),
-            A = aSparseMatrix.getValues(),
-            b = aSparseMatrix.getVectorB(),
-            &x = x,
-            &iterations = iterations,
-            &residualLength = residualLength]()
+    long long init_time = 0;
+    long long update_r_length_old_time = 0;
+    long long update_A_times_p_time = 0;
+    long long calc_alpha_time = 0;
+    long long update_guess_time = 0;
+    long long update_r_length_new_time = 0;
+    long long update_direction_time = 0;
+    long long sync_r_dot_r_time = 0;
+    //long long read_buffers_time = 0;
+
+    auto computeLinearSystem = [&]()
     {
-        std::vector<double> r(dim);
-        std::vector<double> A_times_p(dim);
-        std::vector<double> p(dim);
-        double alpha, r_length, old_r_dot_r, new_r_dot_r;
-        double Ap_dot_p;
+        auto start = std::chrono::steady_clock::now();
 
-        for (int i = 0; i < dim; ++i)
-        {
-            x[i] = 0.0;
-            r[i] = b[i];
-            p[i] = b[i];
-        }
+            std::vector<double> r(dim);
+            std::vector<double> A_times_p(dim);
+            std::vector<double> p(dim);
+            double alpha, r_length, old_r_dot_r, new_r_dot_r;
+            double Ap_dot_p;
 
-        old_r_dot_r = 0.0;
-        for (int i = 0; i < dim; i++)
-        {
-            old_r_dot_r += r[i] * r[i];
-        }
-        r_length = sqrt(old_r_dot_r);
+            for (int i = 0; i < dim; ++i)
+            {
+                x[i] = 0.0;
+                r[i] = b[i];
+                p[i] = b[i];
+            }
+
+        auto end = std::chrono::steady_clock::now();
+
+        init_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+        start = std::chrono::steady_clock::now();
+            old_r_dot_r = 0.0;
+            for (int i = 0; i < dim; i++)
+            {
+                old_r_dot_r += r[i] * r[i];
+            }
+            r_length = sqrt(old_r_dot_r);
+
+        end = std::chrono::steady_clock::now();
+
+        update_r_length_old_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
 
         int iteration = 0;
         while (iteration < 50000 && r_length >= 0.01)
         {
-            int etalon = 0;
-            int j = 0;
+            start = std::chrono::steady_clock::now();
+                int etalon = 0;
+                int j = 0;
 
-            for (int i = 0; i < dim; ++i)
-            {
-                A_times_p[i] = 0.0;
-                while (etalon == rows[j])
+                for (int i = 0; i < dim; ++i)
                 {
-                    A_times_p[i] += A[j] * p[cols[j]];
-                    j++;
+                    A_times_p[i] = 0.0;
+                    while (etalon == rows[j])
+                    {
+                        A_times_p[i] += A[j] * p[cols[j]];
+                        j++;
+                    }
+                    etalon++;
                 }
-                etalon++;
-            }
+            end = std::chrono::steady_clock::now();
 
-            Ap_dot_p = 0.0;
-            for (int i = 0; i < dim; i++)
-            {
-                Ap_dot_p += A_times_p[i] * p[i];
-            }
-            alpha = old_r_dot_r / Ap_dot_p;
+            update_A_times_p_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
 
-            for (int i = 0; i < dim; i++)
-            {
-                x[i] += alpha * p[i];
-                r[i] -= alpha * A_times_p[i];
-            }
+            start = std::chrono::steady_clock::now();
+                Ap_dot_p = 0.0;
+                for (int i = 0; i < dim; i++)
+                {
+                    Ap_dot_p += A_times_p[i] * p[i];
+                }
+                alpha = old_r_dot_r / Ap_dot_p;
+            end = std::chrono::steady_clock::now();
 
-            new_r_dot_r = 0.0;
-            for (int i = 0; i < dim; i++)
-            {
-                new_r_dot_r += r[i] * r[i];
-            }
-            r_length = sqrt(new_r_dot_r);
+            calc_alpha_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
 
-            for (int i = 0; i < dim; i++)
-            {
-                p[i] = r[i] + (new_r_dot_r / old_r_dot_r) * p[i];
-            }
+            start = std::chrono::steady_clock::now();
+                for (int i = 0; i < dim; i++)
+                {
+                    x[i] += alpha * p[i];
+                    r[i] -= alpha * A_times_p[i];
+                }
+            end = std::chrono::steady_clock::now();
 
-            old_r_dot_r = new_r_dot_r;
+            update_guess_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+            start = std::chrono::steady_clock::now();
+                new_r_dot_r = 0.0;
+                for (int i = 0; i < dim; i++)
+                {
+                    new_r_dot_r += r[i] * r[i];
+                }
+                r_length = sqrt(new_r_dot_r);
+            end = std::chrono::steady_clock::now();
+
+            update_r_length_new_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+            start = std::chrono::steady_clock::now();
+                for (int i = 0; i < dim; i++)
+                {
+                    p[i] = r[i] + (new_r_dot_r / old_r_dot_r) * p[i];
+                }
+            end = std::chrono::steady_clock::now();
+
+            update_direction_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+            start = std::chrono::steady_clock::now();
+                old_r_dot_r = new_r_dot_r;
+            end = std::chrono::steady_clock::now();
+            sync_r_dot_r_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
             iteration++;
         }
         iterations = iteration;
         residualLength = r_length;
     };
 
-    const auto measuredTime = Timer::computeTime(computeLinearSystem);
+    auto timeInfo = std::make_unique<ScaledTimeInfo>();
+    timeInfo->total_compute_time = Timer::computeTime(computeLinearSystem);
+    //timeInfo->total_kernel_time = Timer::convertNanosecondsToAppropriateMeasure(total_kernel_time);
+    timeInfo->init_time = Timer::convertNanosecondsToAppropriateMeasure(init_time);
+    timeInfo->update_r_length_old_time = Timer::convertNanosecondsToAppropriateMeasure(update_r_length_old_time);
+    timeInfo->update_A_times_p_time = Timer::convertNanosecondsToAppropriateMeasure(update_A_times_p_time);
+    timeInfo->calc_alpha_time = Timer::convertNanosecondsToAppropriateMeasure(calc_alpha_time);
+    timeInfo->update_guess_time = Timer::convertNanosecondsToAppropriateMeasure(update_guess_time);
+    timeInfo->update_r_length_new_time = Timer::convertNanosecondsToAppropriateMeasure(update_r_length_new_time);
+    timeInfo->update_direction_time = Timer::convertNanosecondsToAppropriateMeasure(update_direction_time);
+    timeInfo->sync_r_dot_r_time = Timer::convertNanosecondsToAppropriateMeasure(sync_r_dot_r_time);
+    //timeInfo->read_buffers_time = Timer::convertNanosecondsToAppropriateMeasure(read_buffers_time);
 
-    return { x, iterations, residualLength, measuredTime };
+    return { x, iterations, residualLength, std::move(timeInfo) };
 }
 
 Result steepestDescentCpu(const SparseMatrix& aSparseMatrix)
@@ -516,9 +604,10 @@ Result steepestDescentCpu(const SparseMatrix& aSparseMatrix)
         residualLength = r_length;
     };
 
-    const auto measuredTime = Timer::computeTime(computeLinearSystem);
+    auto timeInfo = std::make_unique<TimeInfo>();
+    timeInfo->total_compute_time = Timer::computeTime(computeLinearSystem);
 
-    return { x, iterations, residualLength, measuredTime };
+    return { x, iterations, residualLength, std::move(timeInfo) };
 }
 
 std::vector<double> matrixVectorMultiplication(const SparseMatrix& aSparseMatrix, const std::vector<double>& aVector)

@@ -3,21 +3,44 @@
 #include <chrono>
 #include <unordered_map>
 #include <string>
+#include <iostream>
 
 namespace Timer
 {
     enum class Measure
     {
-        NANOSECONDS,
-        MICROSECONDS,
-        MILLISECONDS,
-        SECONDS,
+        NANOSECONDS = 0,
+        MICROSECONDS = 1,
+        MILLISECONDS = 2,
+        SECONDS = 3,
     };
 
+    inline std::string toString(Measure measure)
+    {
+        switch (measure)
+        {
+        case Measure::NANOSECONDS:
+            return "nanoseconds";
+        case Measure::MICROSECONDS:
+            return "microseconds";
+        case Measure::MILLISECONDS:
+            return "milliseconds";
+        case Measure::SECONDS:
+            return "seconds";
+        default:
+            return "";
+        }
+    }
     struct ComputedTime
     {
-        long double value;
-        Measure measure;
+        long double value{ 0 };
+        Measure measure{ Measure::NANOSECONDS };
+
+        friend std::ostream& operator<<(std::ostream& os, const ComputedTime& computedTime)
+        {
+            os << computedTime.value << '\t' << Timer::toString(computedTime.measure);
+            return os;
+        }
     };
 
     template<typename T, typename ...Args>
@@ -48,20 +71,21 @@ namespace Timer
         return { count, measure };
     }
 
-    inline std::string toString(Measure measure)
+    inline long double toNanoseconds(const ComputedTime& time)
     {
-        switch (measure)
+        const auto measureVal = static_cast<size_t>(time.measure);
+        auto count = time.value;
+
+        for (size_t i = measureVal; i > 0; --i)
         {
-        case Measure::NANOSECONDS:
-            return "nanoseconds";
-        case Measure::MICROSECONDS:
-            return "microseconds";
-        case Measure::MILLISECONDS:
-            return "milliseconds";
-        case Measure::SECONDS:
-            return "seconds";
-        default:
-            return "";
+            count *= 1000.0;
         }
+        return count;
     }
+
+    inline long double calcPercentage(const ComputedTime& value, const ComputedTime& total)
+    {
+        return toNanoseconds(value) / toNanoseconds(total) * 100.0;
+    }
+
 };
