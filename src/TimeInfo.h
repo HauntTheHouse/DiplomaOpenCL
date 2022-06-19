@@ -1,6 +1,8 @@
 #pragma once
 
 #include <optional>
+#include <iostream>
+
 #include "Timer.h"
 
 struct TimeInfo
