@@ -21,7 +21,7 @@ namespace Algorithms
 	};
 
 	Result conjugateGradientGpu(const SparseMatrix& aSparseMatrix);
-	Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix);
+	Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix, bool computeOneThreadedKernelsOnCPU);
 	Result conjugateGradientCpu(const SparseMatrix& aSparseMatrix);
 
 	Result steepestDescentGpu(const SparseMatrix& aSparseMatrix);

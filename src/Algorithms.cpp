@@ -149,14 +149,14 @@ Result conjugateGradientGpu(const SparseMatrix& aSparseMatrix)
 
     auto timeInfo = std::make_unique<NonScaledTimeInfo>();
     timeInfo->total_compute_time  = Timer::computeTime(computeLinearSystem);
-    timeInfo->total_kernel_time   = Timer::convertNanosecondsToAppropriateMeasure(kernel_compute_time + read_buffer_time);
-    timeInfo->kernel_compute_time = Timer::convertNanosecondsToAppropriateMeasure(kernel_compute_time);
-    timeInfo->read_buffer_time    = Timer::convertNanosecondsToAppropriateMeasure(read_buffer_time);
+    timeInfo->total_kernel_time   = Timer::toAppropriateMeasure(kernel_compute_time + read_buffer_time);
+    timeInfo->kernel_compute_time = Timer::toAppropriateMeasure(kernel_compute_time);
+    timeInfo->read_buffer_time    = Timer::toAppropriateMeasure(read_buffer_time);
 
     return { x, static_cast<int>(result[0]), result[1], std::move(timeInfo) };
 }
 
-Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
+Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix, bool computeOneThreadedKernelsOnCPU)
 {
     const auto [context, program, device] = initOpenCL("kernels/conjugateGradientScaled.cl");
 
@@ -281,25 +281,98 @@ Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
         queue.enqueueNDRangeKernel(init_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
         init_time += getComputeTime(event);
 
-        queue.enqueueNDRangeKernel(update_r_length_old_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
-        update_r_length_old_time += getComputeTime(event);
+        if (computeOneThreadedKernelsOnCPU)
+        {
+            queue.enqueueReadBuffer(rBuf, CL_TRUE, 0, r.size() * sizeof(double), r.data(), nullptr, &event);
+            read_buffers_time += getComputeTime(event);
 
-        queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length, nullptr, &event);
-        read_buffers_time += getComputeTime(event);
+            const auto start = std::chrono::steady_clock::now();
+                old_r_dot_r = 0.0;
+                for (int i = 0; i < dimension; i++)
+                {
+                    old_r_dot_r += r[i] * r[i];
+                }
+                r_length = sqrt(old_r_dot_r);
+            const auto end = std::chrono::steady_clock::now();
+
+            update_r_length_old_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+            queue.enqueueWriteBuffer(old_r_dot_r_Buf, CL_TRUE, 0, sizeof(double), &old_r_dot_r, nullptr, &event);
+            read_buffers_time += getComputeTime(event);
+        }
+        else
+        {
+            queue.enqueueNDRangeKernel(update_r_length_old_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
+            update_r_length_old_time += getComputeTime(event);
+
+            queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length, nullptr, &event);
+            read_buffers_time += getComputeTime(event);
+        }
 
         while (iterations < 50000 && r_length >= 0.01)
         {
             queue.enqueueNDRangeKernel(update_A_times_p_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
             update_A_times_p_time += getComputeTime(event);
 
-            queue.enqueueNDRangeKernel(calculate_alpha_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
-            calc_alpha_time += getComputeTime(event);
+            if (computeOneThreadedKernelsOnCPU)
+            {
+                queue.enqueueReadBuffer(A_times_p_Buf, CL_TRUE, 0, A_times_p.size() * sizeof(double), A_times_p.data(), nullptr, &event);
+                read_buffers_time += getComputeTime(event);
+                queue.enqueueReadBuffer(pBuf, CL_TRUE, 0, p.size() * sizeof(double), p.data(), nullptr, &event);
+                read_buffers_time += getComputeTime(event);
+                queue.enqueueReadBuffer(old_r_dot_r_Buf, CL_TRUE, 0, sizeof(double), &old_r_dot_r, nullptr, &event);
+                read_buffers_time += getComputeTime(event);
+
+                const auto start = std::chrono::steady_clock::now();
+                    double Ap_dot_p = 0.0;
+                    for (int i = 0; i < dimension; i++)
+                    {
+                        Ap_dot_p += A_times_p[i] * p[i];
+                    }
+                    alpha = old_r_dot_r / Ap_dot_p;
+                const auto end = std::chrono::steady_clock::now();
+
+                calc_alpha_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+                queue.enqueueWriteBuffer(alpha_Buf, CL_TRUE, 0, sizeof(double), &alpha, nullptr, &event);
+                read_buffers_time += getComputeTime(event);
+            }
+            else
+            {
+                queue.enqueueNDRangeKernel(calculate_alpha_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
+                calc_alpha_time += getComputeTime(event);
+            }
 
             queue.enqueueNDRangeKernel(update_guess_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
             update_guess_time += getComputeTime(event);
 
-            queue.enqueueNDRangeKernel(update_r_length_new_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
-            update_r_length_new_time += getComputeTime(event);
+            if (computeOneThreadedKernelsOnCPU)
+            {
+                queue.enqueueReadBuffer(rBuf, CL_TRUE, 0, r.size() * sizeof(double), r.data(), nullptr, &event);
+                read_buffers_time += getComputeTime(event);
+
+                const auto start = std::chrono::steady_clock::now();
+                    new_r_dot_r = 0.0;
+                    for (int i = 0; i < dimension; i++)
+                    {
+                        new_r_dot_r += r[i] * r[i];
+                    }
+                    r_length = sqrt(new_r_dot_r);
+                 const auto end = std::chrono::steady_clock::now();
+
+                 update_r_length_new_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+                queue.enqueueWriteBuffer(new_r_dot_r_Buf, CL_TRUE, 0, sizeof(double), &new_r_dot_r, nullptr, &event);
+                read_buffers_time += getComputeTime(event);
+            }
+            else
+            {
+                queue.enqueueNDRangeKernel(update_r_length_new_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
+                update_r_length_new_time += getComputeTime(event);
+
+                queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length, nullptr, &event);
+                read_buffers_time += getComputeTime(event);
+            }
 
             queue.enqueueNDRangeKernel(update_direction_kernel, cl::NullRange, cl::NDRange(global), cl::NDRange(local), nullptr, &event);
             update_direction_time += getComputeTime(event);
@@ -307,13 +380,10 @@ Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
             queue.enqueueNDRangeKernel(sync_r_dot_r_kernel, cl::NullRange, cl::NDRange(1), cl::NDRange(1), nullptr, &event);
             sync_r_dot_r_time += getComputeTime(event);
 
-            queue.enqueueReadBuffer(r_length_Buf, CL_TRUE, 0, sizeof(double), &r_length, nullptr, &event);
-            read_buffers_time += getComputeTime(event);
-
             iterations++;
         }
 
-        queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data());
+        queue.enqueueReadBuffer(xBuf, CL_TRUE, 0, x.size() * sizeof(double), x.data(), nullptr, &event);
         read_buffers_time += getComputeTime(event);
 
         total_kernel_time = init_time + update_r_length_old_time + update_A_times_p_time + calc_alpha_time + update_guess_time + update_r_length_new_time + update_direction_time + sync_r_dot_r_time + read_buffers_time;
@@ -322,16 +392,16 @@ Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix)
 
     auto timeInfo = std::make_unique<ScaledTimeInfo>();
     timeInfo->total_compute_time       = Timer::computeTime(computeLinearSystem);
-    timeInfo->total_kernel_time        = Timer::convertNanosecondsToAppropriateMeasure(total_kernel_time);
-    timeInfo->init_time                = Timer::convertNanosecondsToAppropriateMeasure(init_time);
-    timeInfo->update_r_length_old_time = Timer::convertNanosecondsToAppropriateMeasure(update_r_length_old_time);
-    timeInfo->update_A_times_p_time    = Timer::convertNanosecondsToAppropriateMeasure(update_A_times_p_time);
-    timeInfo->calc_alpha_time          = Timer::convertNanosecondsToAppropriateMeasure(calc_alpha_time);
-    timeInfo->update_guess_time        = Timer::convertNanosecondsToAppropriateMeasure(update_guess_time);
-    timeInfo->update_r_length_new_time = Timer::convertNanosecondsToAppropriateMeasure(update_r_length_new_time);
-    timeInfo->update_direction_time    = Timer::convertNanosecondsToAppropriateMeasure(update_direction_time);
-    timeInfo->sync_r_dot_r_time        = Timer::convertNanosecondsToAppropriateMeasure(sync_r_dot_r_time);
-    timeInfo->read_buffers_time        = Timer::convertNanosecondsToAppropriateMeasure(read_buffers_time);
+    timeInfo->total_kernel_time        = Timer::toAppropriateMeasure(total_kernel_time);
+    timeInfo->init_time                = Timer::toAppropriateMeasure(init_time);
+    timeInfo->update_r_length_old_time = Timer::toAppropriateMeasure(update_r_length_old_time);
+    timeInfo->update_A_times_p_time    = Timer::toAppropriateMeasure(update_A_times_p_time);
+    timeInfo->calc_alpha_time          = Timer::toAppropriateMeasure(calc_alpha_time);
+    timeInfo->update_guess_time        = Timer::toAppropriateMeasure(update_guess_time);
+    timeInfo->update_r_length_new_time = Timer::toAppropriateMeasure(update_r_length_new_time);
+    timeInfo->update_direction_time    = Timer::toAppropriateMeasure(update_direction_time);
+    timeInfo->sync_r_dot_r_time        = Timer::toAppropriateMeasure(sync_r_dot_r_time);
+    timeInfo->read_buffers_time        = Timer::toAppropriateMeasure(read_buffers_time);
 
     return { x, iterations, r_length, std::move(timeInfo) };
 }
@@ -521,16 +591,16 @@ Result conjugateGradientCpu(const SparseMatrix& aSparseMatrix)
 
     auto timeInfo = std::make_unique<ScaledTimeInfo>();
     timeInfo->total_compute_time = Timer::computeTime(computeLinearSystem);
-    //timeInfo->total_kernel_time = Timer::convertNanosecondsToAppropriateMeasure(total_kernel_time);
-    timeInfo->init_time = Timer::convertNanosecondsToAppropriateMeasure(init_time);
-    timeInfo->update_r_length_old_time = Timer::convertNanosecondsToAppropriateMeasure(update_r_length_old_time);
-    timeInfo->update_A_times_p_time = Timer::convertNanosecondsToAppropriateMeasure(update_A_times_p_time);
-    timeInfo->calc_alpha_time = Timer::convertNanosecondsToAppropriateMeasure(calc_alpha_time);
-    timeInfo->update_guess_time = Timer::convertNanosecondsToAppropriateMeasure(update_guess_time);
-    timeInfo->update_r_length_new_time = Timer::convertNanosecondsToAppropriateMeasure(update_r_length_new_time);
-    timeInfo->update_direction_time = Timer::convertNanosecondsToAppropriateMeasure(update_direction_time);
-    timeInfo->sync_r_dot_r_time = Timer::convertNanosecondsToAppropriateMeasure(sync_r_dot_r_time);
-    //timeInfo->read_buffers_time = Timer::convertNanosecondsToAppropriateMeasure(read_buffers_time);
+    //timeInfo->total_kernel_time = Timer::toAppropriateMeasure(total_kernel_time);
+    timeInfo->init_time = Timer::toAppropriateMeasure(init_time);
+    timeInfo->update_r_length_old_time = Timer::toAppropriateMeasure(update_r_length_old_time);
+    timeInfo->update_A_times_p_time = Timer::toAppropriateMeasure(update_A_times_p_time);
+    timeInfo->calc_alpha_time = Timer::toAppropriateMeasure(calc_alpha_time);
+    timeInfo->update_guess_time = Timer::toAppropriateMeasure(update_guess_time);
+    timeInfo->update_r_length_new_time = Timer::toAppropriateMeasure(update_r_length_new_time);
+    timeInfo->update_direction_time = Timer::toAppropriateMeasure(update_direction_time);
+    timeInfo->sync_r_dot_r_time = Timer::toAppropriateMeasure(sync_r_dot_r_time);
+    //timeInfo->read_buffers_time = Timer::toAppropriateMeasure(read_buffers_time);
 
     return { x, iterations, residualLength, std::move(timeInfo) };
 }

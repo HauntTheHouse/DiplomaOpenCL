@@ -44,24 +44,27 @@ int main()
 
     // Here is the choice of method that will be used for solving SLAE using GPU or CPU
     std::cout << "\n\nChoose method that solves SLAE:" << std::endl;
-    std::cout << "1. Conjugate gradient method on GPU" << std::endl;
-    std::cout << "2. Conjugate gradient method on GPU (scaled for big matrices)" << std::endl;
-    std::cout << "3. Conjugate gradient method on CPU" << std::endl;
-    std::cout << "4. Steepest descent method on GPU" << std::endl;
-    std::cout << "5. Steepest descent method on CPU" << std::endl;
+    std::cout << "1. Conjugate gradient method on GPU (dimention < work group size)" << std::endl;
+    std::cout << "2. Conjugate gradient method on GPU (no restrictions)" << std::endl;
+    std::cout << "3. Conjugate gradient method on CPU (no restrictions)" << std::endl;
+    std::cout << "4. Conjugate gradient method on GPU and CPU (no restrictions)" << std::endl;
+    std::cout << "5. Steepest descent method on GPU" << std::endl;
+    std::cout << "6. Steepest descent method on CPU" << std::endl;
 
-    const int chosenMethod = Utils::selectOption(1, 5);
+    const int chosenMethod = Utils::selectOption(1, 6);
 
     Algorithms::Result result;
     if (chosenMethod == 1)
         result = Algorithms::conjugateGradientGpu(sparseMatrix);
     else if (chosenMethod == 2)
-        result = Algorithms::conjugateGradientGpuScaled(sparseMatrix);
+        result = Algorithms::conjugateGradientGpuScaled(sparseMatrix, false);
     else if (chosenMethod == 3)
         result = Algorithms::conjugateGradientCpu(sparseMatrix);
     else if (chosenMethod == 4)
-        result = Algorithms::steepestDescentGpu(sparseMatrix);
+        result = Algorithms::conjugateGradientGpuScaled(sparseMatrix, true);
     else if (chosenMethod == 5)
+        result = Algorithms::steepestDescentGpu(sparseMatrix);
+    else if (chosenMethod == 6)
         result = Algorithms::steepestDescentCpu(sparseMatrix);
 
 
