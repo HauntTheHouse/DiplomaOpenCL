@@ -4,7 +4,11 @@
 #include <string>
 #include <cassert>
 #include <chrono>
+
 #include <CL/opencl.hpp>
+#include <viennacl/matrix.hpp>
+#include <viennacl/linalg/cg.hpp>
+#include <viennacl/linalg/jacobi_precond.hpp>
 
 #include "SparseMatrix.h"
 #include "Utils.h"
@@ -462,6 +466,8 @@ Result steepestDescentGpu(const SparseMatrix& aSparseMatrix)
 
 Result conjugateGradientCpu(const SparseMatrix& aSparseMatrix)
 {
+    std::cout << "\n\nSolving of SLAE...\n";
+
     const int dim = aSparseMatrix.getDimension();
     const int num_vals = aSparseMatrix.getValuesNum();
     const int* rows = aSparseMatrix.getRowIds();
@@ -591,7 +597,6 @@ Result conjugateGradientCpu(const SparseMatrix& aSparseMatrix)
 
     auto timeInfo = std::make_unique<ScaledTimeInfo>();
     timeInfo->total_compute_time = Timer::computeTime(computeLinearSystem);
-    //timeInfo->total_kernel_time = Timer::toAppropriateMeasure(total_kernel_time);
     timeInfo->init_time = Timer::toAppropriateMeasure(init_time);
     timeInfo->update_r_length_old_time = Timer::toAppropriateMeasure(update_r_length_old_time);
     timeInfo->update_A_times_p_time = Timer::toAppropriateMeasure(update_A_times_p_time);
@@ -600,9 +605,83 @@ Result conjugateGradientCpu(const SparseMatrix& aSparseMatrix)
     timeInfo->update_r_length_new_time = Timer::toAppropriateMeasure(update_r_length_new_time);
     timeInfo->update_direction_time = Timer::toAppropriateMeasure(update_direction_time);
     timeInfo->sync_r_dot_r_time = Timer::toAppropriateMeasure(sync_r_dot_r_time);
-    //timeInfo->read_buffers_time = Timer::toAppropriateMeasure(read_buffers_time);
 
     return { x, iterations, residualLength, std::move(timeInfo) };
+}
+
+Result conjugateGradientViennaCL(const SparseMatrix& aSparseMatrix, bool hasPreconditioner)
+{
+    std::cout << "\n\nChoose an available platform:" << std::endl;
+
+    auto platforms = viennacl::ocl::get_platforms();
+    for (size_t i = 0; i < platforms.size(); ++i)
+    {
+        std::cout << i + 1 << ". " << platforms[i].info() << std::endl;
+
+        auto devices = platforms[i].devices();
+        for (auto& device : devices)
+        {
+            std::cout << device.info() << std::endl;
+        }
+    }
+
+    const int chosenPlatform = Utils::selectOption(1, platforms.size());
+
+    auto& platform = platforms[chosenPlatform - 1];
+    std::cout << std::endl << "Using platform: " << platform.info() << std::endl;
+
+    auto device = platform.devices().front();
+
+    viennacl::ocl::setup_context(0, device);
+    viennacl::context context(viennacl::ocl::get_context(0));
+
+    const size_t dimension = aSparseMatrix.getDimension();
+    const size_t valuesNum = aSparseMatrix.getValuesNum();
+    const auto* rowIds = aSparseMatrix.getRowIds();
+    const auto* colIds = aSparseMatrix.getColIds();
+    const auto* values = aSparseMatrix.getValues();
+
+    viennacl::compressed_matrix<double> gpuMatrix(dimension, dimension, valuesNum, context);
+    std::vector<std::map<unsigned int, double>> cpuMatrix(dimension);
+
+    for (size_t i = 0; i < valuesNum; ++i)
+    {
+        cpuMatrix[rowIds[i]].insert({ colIds[i], values[i] });
+    }
+
+    viennacl::copy(cpuMatrix, gpuMatrix);
+
+    viennacl::vector<double> gpuB(dimension, context);
+    std::vector<double> cpuB;
+    cpuB.insert(cpuB.end(), &aSparseMatrix.getVectorB()[0], &aSparseMatrix.getVectorB()[dimension]);
+
+    viennacl::copy(cpuB, gpuB);
+
+    viennacl::vector<double> gpuX(dimension, context);
+    std::vector<double> cpuX(dimension);
+
+    viennacl::linalg::jacobi_precond jacobi(gpuMatrix, viennacl::linalg::jacobi_tag());
+    auto cgSolver = hasPreconditioner
+        ? viennacl::linalg::cg_tag(1e-9, 50'000)
+        : viennacl::linalg::cg_tag(1e-5, 50'000);
+
+    std::cout << "\n\nSolving of SLAE...\n";
+    auto start = std::chrono::steady_clock::now();
+    gpuX = hasPreconditioner
+        ? viennacl::linalg::solve(gpuMatrix, gpuB, cgSolver, jacobi)
+        : viennacl::linalg::solve(gpuMatrix, gpuB, cgSolver);
+    auto end = std::chrono::steady_clock::now();
+
+    auto computeTime = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+    viennacl::backend::finish();
+
+    viennacl::copy(gpuX, cpuX);
+
+    auto timeInfo = std::make_unique<TimeInfo>();
+    timeInfo->total_compute_time = Timer::toAppropriateMeasure(computeTime);
+
+    return Result{ cpuX, static_cast<int>(cgSolver.iters()), cgSolver.error(), std::move(timeInfo) };
 }
 
 Result steepestDescentCpu(const SparseMatrix& aSparseMatrix)

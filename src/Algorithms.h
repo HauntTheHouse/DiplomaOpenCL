@@ -24,6 +24,8 @@ namespace Algorithms
 	Result conjugateGradientGpuScaled(const SparseMatrix& aSparseMatrix, bool computeOneThreadedKernelsOnCPU);
 	Result conjugateGradientCpu(const SparseMatrix& aSparseMatrix);
 
+	Result conjugateGradientViennaCL(const SparseMatrix& aSparseMatrix, bool hasPreconditioner);
+
 	Result steepestDescentGpu(const SparseMatrix& aSparseMatrix);
 	Result steepestDescentCpu(const SparseMatrix& aSparseMatrix);
 

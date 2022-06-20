@@ -43,15 +43,17 @@ int main()
 
 
     // Here is the choice of method that will be used for solving SLAE using GPU or CPU
-    std::cout << "\n\nChoose method that solves SLAE:" << std::endl;
-    std::cout << "1. Conjugate gradient method on GPU (dimention < work group size)" << std::endl;
-    std::cout << "2. Conjugate gradient method on GPU (no restrictions)" << std::endl;
-    std::cout << "3. Conjugate gradient method on CPU (no restrictions)" << std::endl;
-    std::cout << "4. Conjugate gradient method on GPU and CPU (no restrictions)" << std::endl;
-    std::cout << "5. Steepest descent method on GPU" << std::endl;
-    std::cout << "6. Steepest descent method on CPU" << std::endl;
+    std::cout << "\n\nChoose method that solves SLAE:\n";
+    std::cout << "1. Conjugate gradient method on GPU (matrix dimension must be less than work group size of GPU)\n";
+    std::cout << "2. Conjugate gradient method on GPU\n";
+    std::cout << "3. Conjugate gradient method on CPU\n";
+    std::cout << "4. Conjugate gradient method on GPU and CPU\n";
+    std::cout << "5. Conjugate gradient method using ViennaCL library (no preconditioners)\n";
+    std::cout << "6. Conjugate gradient method using ViennaCL library (Jacobi preconditioner)\n";
+    std::cout << "7. Steepest descent method on GPU\n";
+    std::cout << "8. Steepest descent method on CPU\n";
 
-    const int chosenMethod = Utils::selectOption(1, 6);
+    const int chosenMethod = Utils::selectOption(1, 7);
 
     Algorithms::Result result;
     if (chosenMethod == 1)
@@ -63,8 +65,12 @@ int main()
     else if (chosenMethod == 4)
         result = Algorithms::conjugateGradientGpuScaled(sparseMatrix, true);
     else if (chosenMethod == 5)
-        result = Algorithms::steepestDescentGpu(sparseMatrix);
+        result = Algorithms::conjugateGradientViennaCL(sparseMatrix, false);
     else if (chosenMethod == 6)
+        result = Algorithms::conjugateGradientViennaCL(sparseMatrix, true);
+    else if (chosenMethod == 7)
+        result = Algorithms::steepestDescentGpu(sparseMatrix);
+    else if (chosenMethod == 8)
         result = Algorithms::steepestDescentCpu(sparseMatrix);
 
 

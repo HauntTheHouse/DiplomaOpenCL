@@ -12,9 +12,32 @@ file(GLOB SRCS
 find_package(OpenCL REQUIRED)
 
 add_executable(${PROJECT} ${SRCS})
-target_link_libraries(${PROJECT} PRIVATE ${OpenCL_LIBRARIES})
-#target_include_directories(${PROJECT} PUBLIC ${OpenCL_INCLUDE_DIRS})
-target_include_directories(${PROJECT} PUBLIC "libs/OpenCL-CLHPP/include" "libs/OpenCL-Headers")
+
+add_definitions(-DVIENNACL_WITH_OPENCL)
+
+set(VIENNACL_SRC_PATH "libs/viennacl/libviennacl/src")
+add_library(viennacl SHARED ${VIENNACL_SRC_PATH}/backend.cpp
+                            ${VIENNACL_SRC_PATH}/blas1.cpp ${VIENNACL_SRC_PATH}/blas1_host.cpp ${VIENNACL_SRC_PATH}/blas1_opencl.cpp
+                            ${VIENNACL_SRC_PATH}/blas2.cpp ${VIENNACL_SRC_PATH}/blas2_host.cpp ${VIENNACL_SRC_PATH}/blas2_opencl.cpp
+                            ${VIENNACL_SRC_PATH}/blas3.cpp ${VIENNACL_SRC_PATH}/blas3_host.cpp ${VIENNACL_SRC_PATH}/blas3_opencl.cpp)
+target_link_libraries(viennacl PUBLIC ${OpenCL_LIBRARIES})
+
+target_include_directories(viennacl PUBLIC
+    "libs/viennacl/libviennacl/include"
+    "libs/OpenCL-Headers"
+    "libs/viennacl"
+)
+
+target_link_libraries(${PROJECT} PRIVATE
+    viennacl
+)
+
+target_include_directories(${PROJECT} PUBLIC
+    "libs/OpenCL-CLHPP/include"
+    "libs/OpenCL-Headers"
+    "libs/viennacl"
+    "libs/viennacl/libviennacl/include"
+)
 
 file(COPY kernels DESTINATION .)
 file(COPY data DESTINATION .)
