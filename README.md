@@ -1,5 +1,5 @@
 # DiplomaOpenCL
-This is the project created during the writing of my diploma work of [NTUU KPI](https://en.wikipedia.org/wiki/Igor_Sikorsky_Kyiv_Polytechnic_Institute) of IASA faculty. The topic of this paper is "SLAE solving procedures with sparse matrices using both GPU and CPU computing".
+This is the project created during the writing of my [diploma work](https://ela.kpi.ua/bitstream/123456789/52753/1/Durda_bakalavr.pdf) of [NTUU KPI](https://en.wikipedia.org/wiki/Igor_Sikorsky_Kyiv_Polytechnic_Institute) of IASA faculty. The topic of this paper is "SLAE solving procedures with sparse matrices using both GPU and CPU computing".
 
 It is a program that allows you to solve a system of linear equations with sparse matrices using GPU and CPU calculations.
 
